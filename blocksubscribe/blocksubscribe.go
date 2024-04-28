@@ -1,4 +1,4 @@
-package blocksub
+package blocksubscribe
 
 import (
 	"context"

@@ -6,14 +6,29 @@ import (
 	"fmt"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/hashicorp/go-hclog"
+	"github.com/sol-tx/blocksubscribe"
 	"github.com/sol-tx/config"
 	"github.com/sol-tx/log"
 	"os"
 )
 
 type Handler struct {
-	ctx context.Context
-	log hclog.Logger
+	ctx             context.Context
+	log             hclog.Logger
+	blockSubscriber *blocksubscribe.BlockSubscribe
+	updatedBlocks   chan *rpc.GetBlockResult
+}
+
+func newBlockSubscribe(ctx context.Context, cfg config.BlockSubscribe, cb blocksubscribe.Callback) *blocksubscribe.BlockSubscribe {
+	rpcUrls := make([]string, 0)
+	wsUrls := make([]string, 0)
+	for _, node := range cfg.Nodes {
+		if node.Enable {
+			rpcUrls = append(rpcUrls, node.Rpc)
+			wsUrls = append(wsUrls, node.Ws)
+		}
+	}
+	return blocksubscribe.New(ctx, rpcUrls, wsUrls, cb)
 }
 
 func New(ctx context.Context, dir string) *Handler {
@@ -29,14 +44,18 @@ func New(ctx context.Context, dir string) *Handler {
 	}
 	//
 	t := &Handler{
-		ctx: ctx,
-		log: log.NewLog("sol-tx"),
+		ctx:           ctx,
+		log:           log.NewLog("sol-tx"),
+		updatedBlocks: make(chan *rpc.GetBlockResult, 1024),
 	}
 	//
+	t.blockSubscriber = newBlockSubscribe(ctx, cfg.BlockSubscribe, t)
 	return t
 }
 
 func (t *Handler) Start() error {
+	t.blockSubscriber.Start()
+	go t.process()
 	return nil
 }
 
@@ -51,6 +70,24 @@ func (t *Handler) Stop() error {
 }
 
 func (t *Handler) OnBlock(block *rpc.GetBlockResult) error {
-	//t.updatedBlocks <- block
+	t.updatedBlocks <- block
 	return nil
+}
+
+func (t *Handler) process() {
+	defer func() {
+		t.log.Info("blockHandler process exit")
+	}()
+	for {
+		select {
+		case block := <-t.updatedBlocks:
+			t.processBlock(block)
+		case <-t.ctx.Done():
+			return
+		}
+	}
+}
+
+func (t *Handler) processBlock(block *rpc.GetBlockResult) {
+	t.log.Info("blockHandler", "hash", block.Blockhash, "time", block.BlockTime.Time().UTC().Format("2006-01-02 15:04:05"))
 }
