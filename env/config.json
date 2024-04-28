@@ -1,0 +1,113 @@
+{
+  "Mainnet": true,
+  "RecentBlockHash": {
+    "Nodes": [
+      {
+        "Enable": true,
+        "Rpc": "https://api.mainnet-beta.solana.com",
+        "Ws": "ws://api.mainnet-beta.solana.com"
+      }
+    ]
+  },
+  "BlockHandler": {
+    "Nodes": [
+      {
+        "Enable": true,
+        "Rpc": "https://api.mainnet-beta.solana.com",
+        "Ws": "ws://api.mainnet-beta.solana.com"
+      }
+    ]
+  },
+  "Node": {
+    "Rpc": "https://api.mainnet-beta.solana.com",
+    "Ws": "wss://api.mainnet-beta.solana.com"
+  },
+  "Market": {
+    "Node": {
+      "Enable": true,
+      "Rpc": "https://api.mainnet-beta.solana.com",
+      "Ws": "wss://api.mainnet-beta.solana.com"
+    },
+    "Programs": [
+      {
+        "Enable": true,
+        "Id": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
+      },
+      {
+        "Enable": true,
+        "Id": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
+      },
+      {
+        "Enable": true,
+        "Id": "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
+      }
+    ]
+  },
+  "Senders": [
+    {
+      "Enable": true,
+      "Name": "rpc.sender",
+      "Nodes": [
+        {
+          "Enable": true,
+          "Rpc": "https://api.mainnet-beta.solana.com",
+          "Ws": "wss://api.mainnet-beta.solana.com"
+        }
+      ],
+      "Parameters": {
+        "Concurrence": 16
+      }
+    },
+    {
+      "Enable": true,
+      "Name": "jito.sender",
+      "Nodes": [
+        {
+          "Rpc": "ny.mainnet.block-engine.jito.wtf:443",
+          "Enable": true
+        },
+        {
+          "Rpc": "amsterdam.mainnet.block-engine.jito.wtf:443",
+          "Enable": true
+        },
+        {
+          "Rpc": "frankfurt.mainnet.block-engine.jito.wtf:443",
+          "Enable": true
+        }
+      ],
+      "Parameters": {
+        "Concurrence": 16,
+        "Key": "",
+        "Tip": 10000000
+      }
+    }
+  ],
+  "Notify": {
+    "Items": {
+      "Ding": {
+        "Enable": true,
+        "Url": "https://oapi.dingtalk.com/robot/send?access_token=08584cc5e8ef3d59caa4d94623b0d1f5deb06cfa966a26103270646842b7d926"
+      }
+    }
+  },
+  "Snipe": {
+    "Tokens": {
+      "So11111111111111111111111111111111111111112": true
+    },
+    "Pools": {
+      "So11111111111111111111111111111111111111112": true
+    },
+    "Trade": {
+      "InputToken": "So11111111111111111111111111111111111111112",
+      "InputAmount": 1000000000
+    },
+    "TransactionSender": "jito.sender"
+  },
+  "Wallet": {
+    "Key": ""
+  },
+  "PoolListen": {
+    "StartSlot": 255333725,
+    "EnsSlot": 0
+  }
+}
