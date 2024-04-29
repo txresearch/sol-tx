@@ -18,8 +18,18 @@ type Program struct {
 	Id     solana.PublicKey
 }
 
+type Dao struct {
+	User     string
+	Password string
+	Url      string
+	Port     uint
+	Scheme   string
+	Debug    bool
+}
+
 type Config struct {
 	Mainnet        bool
 	BlockSubscribe BlockSubscribe
 	Programs       []Program
+	Dao            Dao
 }

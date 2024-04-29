@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"github.com/sol-tx/blocksubscribe"
 	"github.com/sol-tx/config"
+	"github.com/sol-tx/db"
 	"github.com/sol-tx/log"
 	"os"
 )
@@ -17,6 +18,7 @@ type Handler struct {
 	log             hclog.Logger
 	blockSubscriber *blocksubscribe.BlockSubscribe
 	updatedBlocks   chan *rpc.GetBlockResult
+	dao             *db.Dao
 }
 
 func newBlockSubscribe(ctx context.Context, cfg config.BlockSubscribe, cb blocksubscribe.Callback) *blocksubscribe.BlockSubscribe {
@@ -29,6 +31,18 @@ func newBlockSubscribe(ctx context.Context, cfg config.BlockSubscribe, cb blocks
 		}
 	}
 	return blocksubscribe.New(ctx, rpcUrls, wsUrls, cb)
+}
+
+func newDao(ctx context.Context, cfg config.Dao) *db.Dao {
+	c := &db.Config{
+		User:     cfg.User,
+		Password: cfg.Password,
+		Url:      cfg.Url,
+		Scheme:   cfg.Scheme,
+		Port:     cfg.Port,
+		Debug:    cfg.Debug,
+	}
+	return db.New(c)
 }
 
 func New(ctx context.Context, dir string) *Handler {
@@ -50,6 +64,7 @@ func New(ctx context.Context, dir string) *Handler {
 	}
 	//
 	t.blockSubscriber = newBlockSubscribe(ctx, cfg.BlockSubscribe, t)
+	t.dao = newDao(ctx, cfg.Dao)
 	return t
 }
 

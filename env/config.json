@@ -25,5 +25,12 @@
       "Name": "raydiumamm",
       "Id": "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
     }
-  ]
+  ],
+  "Dao": {
+    "User": "",
+    "Password": "",
+    "Url": "",
+    "Scheme": "",
+    "Debug": true
+  }
 }
