@@ -27,10 +27,11 @@
     }
   ],
   "Dao": {
-    "User": "",
-    "Password": "",
-    "Url": "",
-    "Scheme": "",
+    "User": "tangaoyuan",
+    "Password": "123456",
+    "Url": "localhost",
+    "Scheme": "soltx",
+    "Port": 5432,
     "Debug": true
   }
 }

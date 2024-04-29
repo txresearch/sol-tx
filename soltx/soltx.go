@@ -233,7 +233,7 @@ func (t *Handler) parseBlock(block *rpc.GetBlockResult) (*db.Block, []*db.Transa
 		subInstructions(instructions, inTree)
 		//
 		innerInstructions := meta.InnerInstructions
-		if len(instructions) > 0 {
+		if len(innerInstructions) > 0 {
 			for _, innerInstruction := range innerInstructions {
 				pinn := inTree.Children[innerInstruction.Index]
 				subInnerInstructions(innerInstruction.Instructions, 2, pinn)
