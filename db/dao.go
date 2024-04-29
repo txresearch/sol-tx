@@ -31,7 +31,7 @@ func New(cfg *Config) *Dao {
 	if err != nil {
 		panic(err)
 	}
-	err = db.AutoMigrate(&Trade{}, &Token{}, &UserOwner{}, &Pool{})
+	err = db.AutoMigrate(&Block{}, &Transaction{}, &Trade{}, &Token{}, &UserOwner{}, &Pool{})
 	if err != nil {
 		panic(err)
 	}
@@ -39,6 +39,24 @@ func New(cfg *Config) *Dao {
 		db: db,
 	}
 	return s
+}
+
+func (d *Dao) SaveBlock(b *Block) error {
+	return d.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "height"},
+		},
+		DoNothing: true,
+	}).Save(b).Error
+}
+
+func (d *Dao) SaveTransaction(t *Transaction) error {
+	return d.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "hash"},
+		},
+		DoNothing: true,
+	}).Save(t).Error
 }
 
 func (d *Dao) SaveTrade(t *Trade) error {

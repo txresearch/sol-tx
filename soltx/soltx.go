@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/hashicorp/go-hclog"
 	"github.com/sol-tx/blocksubscribe"
 	"github.com/sol-tx/config"
 	"github.com/sol-tx/db"
 	"github.com/sol-tx/log"
+	"github.com/sol-tx/program"
 	"os"
 )
 
@@ -103,6 +105,144 @@ func (t *Handler) process() {
 	}
 }
 
-func (t *Handler) processBlock(block *rpc.GetBlockResult) {
+func subInstructions(ins []solana.CompiledInstruction, inTree *program.InstructionNode) {
+	keys := inTree.Instruction.Accounts
+	for i, in := range ins {
+		programId := keys[in.ProgramIDIndex]
+		accounts := make([]*solana.AccountMeta, 0)
+		for _, a := range in.AccountsWithKey {
+			for _, b := range keys {
+				if b.PublicKey == a {
+					accounts = append(accounts, b)
+				}
+			}
+		}
+		a := &program.Instruction{
+			Program:  programId.PublicKey,
+			Accounts: accounts,
+			Data:     in.Data,
+		}
+		current := &program.InstructionNode{
+			StackHeight: 1,
+			Seq:         i,
+			Instruction: a,
+			Children:    nil,
+		}
+		inTree.Children = append(inTree.Children, current)
+	}
+}
+
+func subInnerInstructions(ins []solana.CompiledInstruction, depth int, inTree *program.InstructionNode) {
+	var current *program.InstructionNode
+	for i, in := range ins {
+		if in.StackHeight == depth+1 {
+			subInnerInstructions(ins[i:], in.StackHeight, current)
+		} else if in.StackHeight == depth-1 {
+			return
+		} else {
+			keys := inTree.Instruction.Accounts
+			accounts := make([]*solana.AccountMeta, 0)
+			for _, a := range in.AccountsWithKey {
+				for _, b := range keys {
+					if b.PublicKey == a {
+						accounts = append(accounts, b)
+					}
+				}
+			}
+			pid := keys[in.ProgramIDIndex].PublicKey
+			a := &program.Instruction{
+				Program:  pid,
+				Accounts: accounts,
+				Data:     in.Data,
+			}
+			current = &program.InstructionNode{
+				StackHeight: in.StackHeight,
+				Seq:         i,
+				Instruction: a,
+				Children:    nil,
+			}
+			inTree.Children = append(inTree.Children, current)
+		}
+	}
+}
+
+func trade(ins []*program.Instruction) {
+
+}
+
+func (t *Handler) parseBlock(block *rpc.GetBlockResult) (*db.Block, []*db.Transaction, []*db.Trade, []*db.Token, []*db.Pool) {
 	t.log.Info("blockHandler", "hash", block.Blockhash, "time", block.BlockTime.Time().UTC().Format("2006-01-02 15:04:05"))
+	// must with meta - json parsed
+	// block
+	b := &db.Block{
+		Height: *block.BlockHeight,
+		Time:   uint64(*block.BlockTime),
+		Hash:   block.Blockhash.String(),
+		Slot:   0,
+	}
+	// save transactions
+	transactions := make([]*db.Transaction, 0)
+	trades := make([]*db.Trade, 0)
+	tokens := make([]*db.Token, 0)
+	pools := make([]*db.Pool, 0)
+	for _, transaction := range block.Transactions {
+		meta := transaction.Meta
+		if meta == nil {
+			t.log.Error("transaction meta is missing")
+			continue
+		}
+		if meta.Err != nil {
+			t.log.Warn("transaction failed, ignore this one")
+			continue
+		}
+		parsedTransaction, err := transaction.GetParsedTransaction()
+		if err != nil {
+			t.log.Error("GetParsedTransaction", "error", err)
+			continue
+		}
+		message := parsedTransaction.Message
+		instructions := message.Instructions
+		if len(instructions) == 0 {
+			t.log.Warn("no instruction")
+			continue
+		}
+		keys, err := message.AccountMetaList()
+		if err != nil {
+			t.log.Error("GetAllKeys", "error", err)
+			continue
+		}
+		if int(instructions[0].ProgramIDIndex) >= len(keys) {
+			t.log.Error("program id invalid")
+			continue
+		}
+		programId := keys[instructions[0].ProgramIDIndex].PublicKey
+		if programId == program.Vote {
+			continue
+		}
+		//
+		inTree := &program.InstructionNode{
+			StackHeight: 0,
+			Seq:         0,
+			Instruction: &program.Instruction{
+				Program:  solana.PublicKey{},
+				Accounts: keys,
+				Data:     nil,
+			},
+			Children: nil,
+		}
+		subInstructions(instructions, inTree)
+		//
+		innerInstructions := meta.InnerInstructions
+		if len(instructions) > 0 {
+			for _, innerInstruction := range innerInstructions {
+				pinn := inTree.Children[innerInstruction.Index]
+				subInnerInstructions(innerInstruction.Instructions, 2, pinn)
+			}
+		}
+	}
+	return b, transactions, trades, tokens, pools
+}
+
+func (t *Handler) processBlock(block *rpc.GetBlockResult) {
+	t.parseBlock(block)
 }

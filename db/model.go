@@ -2,6 +2,19 @@ package db
 
 import "github.com/shopspring/decimal"
 
+type Block struct {
+	Height uint64 `gorm:"type:varchar;not null;uniqueIndex:block_index"`
+	Hash   string
+	Time   uint64
+	Slot   uint64
+}
+
+type Transaction struct {
+	Hash        string `gorm:"type:varchar;not null;uniqueIndex:transaction_index"`
+	BlockHeight uint64
+	Time        uint64
+}
+
 type Trade struct {
 	TxHash       string `gorm:"type:varchar;not null;uniqueIndex:trade_index"`
 	TxSeq        uint64 `gorm:"type:uint;not null;uniqueIndex:trade_index"`
