@@ -11,7 +11,7 @@ import (
 )
 
 type Callback interface {
-	OnBlock(block *rpc.GetBlockResult) error
+	OnBlock(block *rpc.GetParsedBlockResult) error
 }
 
 type BlockSubscribe struct {
@@ -20,7 +20,7 @@ type BlockSubscribe struct {
 	rpcClients []*rpc.Client
 	wsUrls     []string
 	cb         Callback
-	blockSub   *ws.BlockSubscription
+	blockSub   *ws.ParsedBlockSubscription
 }
 
 func New(ctx context.Context, rpcUrls []string, wsUrls []string, cb Callback) *BlockSubscribe {
@@ -63,7 +63,7 @@ func (b *BlockSubscribe) subscribeBlock() {
 		}
 		rewards := false
 		version := uint64(0)
-		sub, err := wsclient.BlockSubscribe(ws.NewBlockSubscribeFilterAll(), &ws.BlockSubscribeOpts{
+		sub, err := wsclient.ParsedBlockSubscribe(ws.NewBlockSubscribeFilterAll(), &ws.BlockSubscribeOpts{
 			Commitment:                     rpc.CommitmentFinalized,
 			Encoding:                       solana.EncodingJSONParsed, // transaction meta will in response
 			TransactionDetails:             rpc.TransactionDetailsFull,
@@ -112,10 +112,10 @@ func (b *BlockSubscribe) subscribeBlock() {
 }
 
 func (b *BlockSubscribe) fetchBlock(start uint64, end uint64) {
-	fetch := func(slot uint64) *rpc.GetBlockResult {
+	fetch := func(slot uint64) *rpc.GetParsedBlockResult {
 		rewards := false
 		version := uint64(0)
-		block, err := b.rpcClients[0].GetBlockWithOpts(b.ctx, slot, &rpc.GetBlockOpts{
+		block, err := b.rpcClients[0].GetParsedBlockWithOpts(b.ctx, slot, &rpc.GetBlockOpts{
 			Encoding:                       solana.EncodingJSONParsed, // transaction meta will in response
 			TransactionDetails:             rpc.TransactionDetailsFull,
 			Rewards:                        &rewards,

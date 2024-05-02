@@ -20,30 +20,45 @@ type Trade struct {
 	TxSeq        uint64 `gorm:"type:uint;not null;uniqueIndex:trade_index"`
 	BlockHeight  uint64
 	BlockSeq     uint64
-	PoolHash     string
+	Pool         string
 	Type         string
-	TokenAHash   string
 	TokenAAmount decimal.Decimal
-	TokenBHash   string
 	TokenBAmount decimal.Decimal
 	User         string
 }
 
-type Token struct {
-	Hash    string `gorm:"type:varchar;not null;uniqueIndex:token_index"`
-	Name    string
-	Symbol  string
-	Decimal uint64
+type Transfer struct {
+	TxHash      string `gorm:"type:varchar;not null;uniqueIndex:trade_index"`
+	TxSeq       uint64 `gorm:"type:uint;not null;uniqueIndex:trade_index"`
+	BlockHeight uint64
+	BlockSeq    uint64
+	Mint        string
+	Amount      uint64
+	User        string
 }
 
-type UserOwner struct {
+type Mint struct {
+	Hash        string `gorm:"type:varchar;not null;uniqueIndex:token_index"`
+	Owner       string
+	Name        string
+	Symbol      string
+	Decimal     uint64
+	TotalSupply uint64
+}
+
+type Token struct {
 	User  string `gorm:"type:varchar;not null;uniqueIndex:user_index"`
 	Owner string
 }
 
 type Pool struct {
-	Hash    string `gorm:"type:varchar;not null;uniqueIndex:pool_index"`
-	TokenA  uint64
-	TokenB  uint64
-	TokenLp uint64
+	Hash     string `gorm:"type:varchar;not null;uniqueIndex:pool_index"`
+	MintA    string
+	MintB    string
+	MintLp   string
+	VaultA   string
+	VaultB   string
+	VaultLp  string
+	ReserveA uint64
+	ReserveB uint64
 }

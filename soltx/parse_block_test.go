@@ -2,8 +2,11 @@ package soltx
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
+	"os"
 	"testing"
 )
 
@@ -11,8 +14,7 @@ func Test_ParseBlock(t *testing.T) {
 	client := rpc.New(rpc.MainNetBeta_RPC)
 	rewards := false
 	version := uint64(0)
-	client.GetParsedTransaction()
-	r, err := client.GetBlockWithOpts(
+	r, err := client.GetParsedBlockWithOpts(
 		context.Background(),
 		262286706,
 		&rpc.GetBlockOpts{
@@ -26,7 +28,12 @@ func Test_ParseBlock(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	//
+	//fmt.Printf("%v\n", r)
 	h := New(context.Background(), "./../env")
-	h.parseBlock(r)
+	txTrees := h.parseBlock(r)
+	//
+	for _, txTree := range txTrees {
+		txTreeJson, _ := json.MarshalIndent(txTree, "", "    ")
+		os.WriteFile(fmt.Sprintf("%s.json", txTree.Hash.String()), txTreeJson, 0644)
+	}
 }

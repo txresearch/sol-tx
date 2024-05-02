@@ -1,6 +1,10 @@
-package program
+package types
 
-import "github.com/gagliardetto/solana-go"
+import (
+	"github.com/gagliardetto/solana-go"
+	"github.com/gagliardetto/solana-go/rpc"
+	"github.com/shopspring/decimal"
+)
 
 var (
 	Compute         = solana.MustPublicKeyFromBase58("ComputeBudget111111111111111111111111111111")
@@ -17,15 +21,25 @@ var (
 	Vote            = solana.MustPublicKeyFromBase58("Vote111111111111111111111111111111111111111")
 )
 
-type Instruction struct {
-	Program  solana.PublicKey
-	Accounts []*solana.AccountMeta
-	Data     solana.Base58
+type Transaction struct {
+	Hash         solana.Signature   `json:"hash"`
+	Instructions []*InstructionNode `json:"instructions"`
 }
 
 type InstructionNode struct {
-	StackHeight int
-	Seq         int
-	Instruction *Instruction
-	Children    []*InstructionNode
+	Seq         int                    `json:"seq"`
+	Instruction *rpc.ParsedInstruction `json:"instruction"`
+	Children    []*InstructionNode     `json:"children,omitempty"`
+}
+
+type Trade struct {
+	TxHash       string `gorm:"type:varchar;not null;uniqueIndex:trade_index"`
+	TxSeq        uint64 `gorm:"type:uint;not null;uniqueIndex:trade_index"`
+	BlockHeight  uint64
+	BlockSeq     uint64
+	Pool         string
+	Type         string
+	TokenAAmount decimal.Decimal
+	TokenBAmount decimal.Decimal
+	User         string
 }
