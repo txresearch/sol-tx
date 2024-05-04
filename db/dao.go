@@ -31,7 +31,7 @@ func New(cfg *Config) *Dao {
 	if err != nil {
 		panic(err)
 	}
-	err = db.AutoMigrate(&Block{}, &Transaction{}, &Trade{}, &Token{}, &UserOwner{}, &Pool{})
+	err = db.AutoMigrate(&Block{}, &Transaction{}, &Trade{}, &Transfer{}, &Mint{}, &Token{}, &Pool{})
 	if err != nil {
 		panic(err)
 	}
@@ -50,7 +50,7 @@ func (d *Dao) SaveBlock(b *Block) error {
 	}).Save(b).Error
 }
 
-func (d *Dao) SaveTransaction(t *Transaction) error {
+func (d *Dao) SaveTransaction(t interface{}) error {
 	return d.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "hash"},
@@ -59,7 +59,7 @@ func (d *Dao) SaveTransaction(t *Transaction) error {
 	}).Save(t).Error
 }
 
-func (d *Dao) SaveTrade(t *Trade) error {
+func (d *Dao) SaveTrade(t interface{}) error {
 	return d.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "tx_hash"},
@@ -69,7 +69,17 @@ func (d *Dao) SaveTrade(t *Trade) error {
 	}).Save(t).Error
 }
 
-func (d *Dao) SaveToken(t *Token) error {
+func (d *Dao) SaveTransfer(t interface{}) error {
+	return d.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "tx_hash"},
+			{Name: "tx_seq"},
+		},
+		DoNothing: true,
+	}).Save(t).Error
+}
+
+func (d *Dao) SaveMint(t interface{}) error {
 	return d.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "hash"},
@@ -78,7 +88,7 @@ func (d *Dao) SaveToken(t *Token) error {
 	}).Save(t).Error
 }
 
-func (d *Dao) SaveUserOwner(u *UserOwner) error {
+func (d *Dao) SaveToken(u interface{}) error {
 	return d.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "user"},
@@ -87,7 +97,7 @@ func (d *Dao) SaveUserOwner(u *UserOwner) error {
 	}).Save(u).Error
 }
 
-func (d *Dao) SavePool(p *Pool) error {
+func (d *Dao) SavePool(p interface{}) error {
 	return d.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "hash"},

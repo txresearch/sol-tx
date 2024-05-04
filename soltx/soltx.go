@@ -16,11 +16,11 @@ import (
 )
 
 type Handler struct {
-	ctx             context.Context
-	log             hclog.Logger
-	blockSubscriber *blocksubscribe.BlockSubscribe
-	updatedBlocks   chan *rpc.GetParsedBlockResult
-	dao             *db.Dao
+	ctx            context.Context
+	log            hclog.Logger
+	blockSubscribe *blocksubscribe.BlockSubscribe
+	updatedBlocks  chan *rpc.GetParsedBlockResult
+	dao            *db.Dao
 }
 
 func newBlockSubscribe(ctx context.Context, cfg config.BlockSubscribe, cb blocksubscribe.Callback) *blocksubscribe.BlockSubscribe {
@@ -65,41 +65,41 @@ func New(ctx context.Context, dir string) *Handler {
 		updatedBlocks: make(chan *rpc.GetParsedBlockResult, 1024),
 	}
 	//
-	t.blockSubscriber = newBlockSubscribe(ctx, cfg.BlockSubscribe, t)
+	t.blockSubscribe = newBlockSubscribe(ctx, cfg.BlockSubscribe, t)
 	t.dao = newDao(ctx, cfg.Dao)
 	return t
 }
 
-func (t *Handler) Start() error {
-	t.blockSubscriber.Start()
-	go t.process()
+func (h *Handler) Start() error {
+	h.blockSubscribe.Start()
+	go h.process()
 	return nil
 }
 
-func (t *Handler) Service() {
-	t.Start()
-	<-t.ctx.Done()
-	t.Stop()
+func (h *Handler) Service() {
+	h.Start()
+	<-h.ctx.Done()
+	h.Stop()
 }
 
-func (t *Handler) Stop() error {
+func (h *Handler) Stop() error {
 	return nil
 }
 
-func (t *Handler) OnBlock(block *rpc.GetParsedBlockResult) error {
-	t.updatedBlocks <- block
+func (h *Handler) OnBlock(block *rpc.GetParsedBlockResult) error {
+	h.updatedBlocks <- block
 	return nil
 }
 
-func (t *Handler) process() {
+func (h *Handler) process() {
 	defer func() {
-		t.log.Info("blockHandler process exit")
+		h.log.Info("blockHandler process exit")
 	}()
 	for {
 		select {
-		case block := <-t.updatedBlocks:
-			t.processBlock(block)
-		case <-t.ctx.Done():
+		case block := <-h.updatedBlocks:
+			h.processBlock(block)
+		case <-h.ctx.Done():
 			return
 		}
 	}
@@ -135,25 +135,25 @@ func subInnerInstructions(ins []*rpc.ParsedInstruction, depth int, inTree *types
 	}
 }
 
-func (t *Handler) parseBlock(block *rpc.GetParsedBlockResult) []*types.Transaction {
-	t.log.Info("blockHandler", "hash", block.Blockhash, "time", block.BlockTime.Time().UTC().Format("2006-01-02 15:04:05"))
+func (h *Handler) parseBlock(block *rpc.GetParsedBlockResult) []*types.Transaction {
+	h.log.Info("blockHandler", "hash", block.Blockhash, "time", block.BlockTime.Time().UTC().Format("2006-01-02 15:04:05"))
 	// must with meta - json parsed
 	txTrees := make([]*types.Transaction, 0)
 	for _, transaction := range block.Transactions {
 		meta := transaction.Meta
 		if meta == nil {
-			t.log.Error("transaction meta is missing")
+			h.log.Error("transaction meta is missing")
 			continue
 		}
 		if meta.Err != nil {
-			t.log.Warn("transaction failed, ignore this one")
+			h.log.Warn("transaction failed, ignore this one")
 			continue
 		}
 		parsedTransaction := transaction.Transaction
 		message := parsedTransaction.Message
 		instructions := message.Instructions
 		if len(instructions) == 0 {
-			t.log.Warn("no instruction")
+			h.log.Warn("no instruction")
 			continue
 		}
 		if instructions[0].ProgramId == types.Vote {
@@ -179,70 +179,89 @@ func (t *Handler) parseBlock(block *rpc.GetParsedBlockResult) []*types.Transacti
 	return txTrees
 }
 
-func (t *Handler) processBlock(block *rpc.GetParsedBlockResult) {
-	tree := t.parseBlock(block)
-	/*
-		b := &db.Block{
-			Height: *block.BlockHeight,
-			Time:   uint64(*block.BlockTime),
-			Hash:   block.Blockhash.String(),
-			Slot:   0,
-		}
-
-	*/
-	// save transactions
-	transactions := make(map[string]*db.Transaction, 0)
-	trades := make(map[string]*db.Trade, 0)
-	transfers := make(map[string]*db.Transfer, 0)
+func (h *Handler) processBlock(block *rpc.GetParsedBlockResult) {
+	tree := h.parseBlock(block)
+	b := &db.Block{
+		Height: *block.BlockHeight,
+		Time:   uint64(*block.BlockTime),
+		Hash:   block.Blockhash.String(),
+		Slot:   0,
+	}
+	// save hash2Transactions
+	hash2Transactions := make(map[string]*db.Transaction, 0)
+	id2Trades := make(map[string]*db.Trade, 0)
+	id2Transfers := make(map[string]*db.Transfer, 0)
 	//tokens := make(map[string]*db.Token, 0)
-	pools := make(map[string]*db.Pool, 0)
+	hash2Pools := make(map[string]*db.Pool, 0)
 	for _, item := range tree {
-		transactions[item.Hash.String()] = &db.Transaction{
+		hash2Transactions[item.Hash.String()] = &db.Transaction{
 			Hash:        item.Hash.String(),
 			BlockHeight: *block.BlockHeight,
 			Time:        uint64(*block.BlockTime),
 		}
 		for _, item1 := range item.Instructions {
-			t.processInstruction(item1, trades, transfers, pools)
+			h.processInstruction(item1, id2Trades, id2Transfers, hash2Pools)
 		}
 	}
+	// save all
+	transactions := make([]*db.Transaction, 0)
+	for _, v := range hash2Transactions {
+		transactions = append(transactions, v)
+	}
+	trades := make([]*db.Trade, 0)
+	for _, v := range id2Trades {
+		trades = append(trades, v)
+	}
+	transfers := make([]*db.Transfer, 0)
+	for _, v := range id2Transfers {
+		transfers = append(transfers, v)
+	}
+	pools := make([]*db.Pool, 0)
+	for _, v := range hash2Pools {
+		pools = append(pools, v)
+	}
+	h.dao.SaveBlock(b)
+	h.dao.SaveTransaction(transactions)
+	h.dao.SaveTrade(trades)
+	h.dao.SaveTransfer(transfers)
+	h.dao.SavePool(pools)
 }
 
-func (t *Handler) processInstruction(in *types.InstructionNode, trades map[string]*db.Trade, transfers map[string]*db.Transfer, pools map[string]*db.Pool) () {
+func (h *Handler) processInstruction(in *types.InstructionNode, trades map[string]*db.Trade, transfers map[string]*db.Transfer, pools map[string]*db.Pool) () {
 	switch in.Instruction.ProgramId {
 	case types.System:
-		t.processSystemTransfer(in.Instruction)
+		h.processSystemTransfer(in)
 	case types.Token:
-		t.processTokenTransfer(in.Instruction)
+		h.processTokenTransfer(in)
 	case types.RaydiumAMM:
-		t.processRaydiumAmmTrade(in)
+		h.processRaydiumAmmTrade(in)
 	case types.RaydiumClmm:
-		t.processRaydiumClmmTrade(in)
-	case types.Whirl:
-		t.processWhirlTrade(in)
+		h.processRaydiumClmmTrade(in)
+	case types.WhirlPool:
+		h.processWhirlPoolTrade(in)
 	default:
 		for _, item := range in.Children {
-			t.processInstruction(item, trades, transfers, pools)
+			h.processInstruction(item, trades, transfers, pools)
 		}
 	}
 }
 
-func (t *Handler) processSystemTransfer(in *rpc.ParsedInstruction) *db.Transfer {
+func (h *Handler) processSystemTransfer(in *types.InstructionNode) *db.Transfer {
 	return nil
 }
 
-func (t *Handler) processTokenTransfer(in *rpc.ParsedInstruction) *db.Transfer {
+func (h *Handler) processTokenTransfer(in *types.InstructionNode) *db.Transfer {
 	return nil
 }
 
-func (t *Handler) processRaydiumAmmTrade(in *types.InstructionNode) *db.Trade {
+func (h *Handler) processRaydiumAmmTrade(in *types.InstructionNode) *db.Trade {
 	return nil
 }
 
-func (t *Handler) processRaydiumClmmTrade(in *types.InstructionNode) *db.Trade {
+func (h *Handler) processRaydiumClmmTrade(in *types.InstructionNode) *db.Trade {
 	return nil
 }
 
-func (t *Handler) processWhirlTrade(in *types.InstructionNode) *db.Trade {
+func (h *Handler) processWhirlPoolTrade(in *types.InstructionNode) *db.Trade {
 	return nil
 }

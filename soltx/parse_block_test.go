@@ -37,3 +37,26 @@ func Test_ParseBlock(t *testing.T) {
 		os.WriteFile(fmt.Sprintf("%s.json", txTree.Hash.String()), txTreeJson, 0644)
 	}
 }
+
+func Test_ProcessBlock(t *testing.T) {
+	client := rpc.New(rpc.MainNetBeta_RPC)
+	rewards := false
+	version := uint64(0)
+	r, err := client.GetParsedBlockWithOpts(
+		context.Background(),
+		262286706,
+		&rpc.GetBlockOpts{
+			Encoding:                       solana.EncodingJSONParsed,
+			TransactionDetails:             rpc.TransactionDetailsFull,
+			Rewards:                        &rewards,
+			Commitment:                     rpc.CommitmentConfirmed,
+			MaxSupportedTransactionVersion: &version,
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	//fmt.Printf("%v\n", r)
+	h := New(context.Background(), "./../env")
+	h.processBlock(r)
+}

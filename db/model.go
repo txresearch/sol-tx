@@ -48,6 +48,7 @@ type Mint struct {
 
 type Token struct {
 	User  string `gorm:"type:varchar;not null;uniqueIndex:user_index"`
+	Mint  string
 	Owner string
 }
 
