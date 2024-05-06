@@ -3,7 +3,6 @@ package types
 import (
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
-	"github.com/shopspring/decimal"
 )
 
 var (
@@ -32,16 +31,4 @@ type InstructionNode struct {
 	Seq         int                    `json:"seq"`
 	Instruction *rpc.ParsedInstruction `json:"instruction"`
 	Children    []*InstructionNode     `json:"children,omitempty"`
-}
-
-type Trade struct {
-	TxHash       string `gorm:"type:varchar;not null;uniqueIndex:trade_index"`
-	TxSeq        uint64 `gorm:"type:uint;not null;uniqueIndex:trade_index"`
-	BlockHeight  uint64
-	BlockSeq     uint64
-	Pool         string
-	Type         string
-	TokenAAmount decimal.Decimal
-	TokenBAmount decimal.Decimal
-	User         string
 }

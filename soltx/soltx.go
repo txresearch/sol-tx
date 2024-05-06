@@ -14,7 +14,9 @@ import (
 	"github.com/sol-tx/db"
 	"github.com/sol-tx/log"
 	raydium_amm "github.com/sol-tx/raydiumamm/generated"
+	amm_v3 "github.com/sol-tx/raydiumclmm/generated"
 	"github.com/sol-tx/types"
+	whirlpool "github.com/sol-tx/whirlpool/generated"
 	"os"
 )
 
@@ -324,53 +326,74 @@ func (h *Handler) processRaydiumAmmTrade(in *types.InstructionNode, tokenAccount
 	if err != nil {
 		return nil
 	}
-	if inst.TypeID.Uint8() != raydium_amm.Instruction_Deposit {
-		accounts := make([]*solana.AccountMeta, 0)
-		for _, item := range in.Instruction.Accounts {
-			accounts = append(accounts, &solana.AccountMeta{
-				PublicKey:  item,
-				IsWritable: false,
-				IsSigner:   false,
-			})
-		}
+	//
+	accounts := make([]*solana.AccountMeta, 0)
+	for _, item := range in.Instruction.Accounts {
+		accounts = append(accounts, &solana.AccountMeta{
+			PublicKey:  item,
+			IsWritable: false,
+			IsSigner:   false,
+		})
+	}
+	//
+	switch inst.TypeID.Uint8() {
+	case raydium_amm.Instruction_Deposit:
 		inst1 := inst.Impl.(*raydium_amm.Deposit)
 		inst1.SetAccounts(accounts)
 		//
-		type instruction struct {
-			Info struct {
-				Destination solana.PublicKey `json:"destination"`
-				Lamports    uint64           `json:"lamports"`
-				Source      solana.PublicKey `json:"source"`
-				Authority   solana.PublicKey `json:"authority"`
-				Mint        solana.PublicKey `json:"mint"`
-				TokenAmount struct {
-					Amount   decimal.Decimal
-					Decimals uint64
-				} `json:"tokenAmount"`
-			} `json:"info"`
-			T string `json:"type"`
-		}
-		tokenAAmount := uint64(0)
-		{
-			ins := in.Instruction
-			var s instruction
-			k, _ := ins.Parsed.MarshalJSON()
-			json.Unmarshal(k, &s)
-			tokenAAmount = s.Info.Lamports
-		}
-		tokenBAmount := uint64(0)
-		{
-			ins := in.Instruction
-			var s instruction
-			k, _ := ins.Parsed.MarshalJSON()
-			json.Unmarshal(k, &s)
-			tokenBAmount = s.Info.Lamports
-		}
+		t1 := h.processTokenTransfer(in.Children[0], tokenAccountOwner, tokenAccountMint)
+		t2 := h.processTokenTransfer(in.Children[1], tokenAccountOwner, tokenAccountMint)
+		//
 		trade := &db.Trade{
 			Pool:         inst1.GetAmmAccount().PublicKey.String(),
 			Type:         "deposit",
-			TokenAAmount: decimal.NewFromInt(int64(tokenAAmount)),
-			TokenBAmount: decimal.NewFromInt(int64(tokenBAmount)),
+			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
+			TokenBAmount: decimal.NewFromInt(int64(t2.Amount)),
+			User:         inst1.GetAmmAuthorityAccount().PublicKey.String(),
+		}
+		return trade
+	case raydium_amm.Instruction_SwapBaseIn:
+		inst1 := inst.Impl.(*raydium_amm.SwapBaseIn)
+		inst1.SetAccounts(accounts)
+		//
+		t1 := h.processTokenTransfer(in.Children[0], tokenAccountOwner, tokenAccountMint)
+		t2 := h.processTokenTransfer(in.Children[1], tokenAccountOwner, tokenAccountMint)
+		//
+		trade := &db.Trade{
+			Pool:         inst1.GetAmmAccount().PublicKey.String(),
+			Type:         "deposit",
+			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
+			TokenBAmount: decimal.NewFromInt(int64(t2.Amount)),
+			User:         inst1.GetAmmAuthorityAccount().PublicKey.String(),
+		}
+		return trade
+	case raydium_amm.Instruction_SwapBaseOut:
+		inst1 := inst.Impl.(*raydium_amm.SwapBaseIn)
+		inst1.SetAccounts(accounts)
+		//
+		t1 := h.processTokenTransfer(in.Children[0], tokenAccountOwner, tokenAccountMint)
+		t2 := h.processTokenTransfer(in.Children[1], tokenAccountOwner, tokenAccountMint)
+		//
+		trade := &db.Trade{
+			Pool:         inst1.GetAmmAccount().PublicKey.String(),
+			Type:         "deposit",
+			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
+			TokenBAmount: decimal.NewFromInt(int64(t2.Amount)),
+			User:         inst1.GetAmmAuthorityAccount().PublicKey.String(),
+		}
+		return trade
+	case raydium_amm.Instruction_Withdraw:
+		inst1 := inst.Impl.(*raydium_amm.SwapBaseIn)
+		inst1.SetAccounts(accounts)
+		//
+		t1 := h.processTokenTransfer(in.Children[0], tokenAccountOwner, tokenAccountMint)
+		t2 := h.processTokenTransfer(in.Children[1], tokenAccountOwner, tokenAccountMint)
+		//
+		trade := &db.Trade{
+			Pool:         inst1.GetAmmAccount().PublicKey.String(),
+			Type:         "deposit",
+			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
+			TokenBAmount: decimal.NewFromInt(int64(t2.Amount)),
 			User:         inst1.GetAmmAuthorityAccount().PublicKey.String(),
 		}
 		return trade
@@ -379,9 +402,150 @@ func (h *Handler) processRaydiumAmmTrade(in *types.InstructionNode, tokenAccount
 }
 
 func (h *Handler) processRaydiumClmmTrade(in *types.InstructionNode, tokenAccountOwner map[solana.PublicKey]solana.PublicKey, tokenAccountMint map[solana.PublicKey]solana.PublicKey) *db.Trade {
+	inst := new(amm_v3.Instruction)
+	data := in.Instruction.Data
+	err := ag_binary.NewBorshDecoder(data).Decode(inst)
+	if err != nil {
+		return nil
+	}
+	//
+	accounts := make([]*solana.AccountMeta, 0)
+	for _, item := range in.Instruction.Accounts {
+		accounts = append(accounts, &solana.AccountMeta{
+			PublicKey:  item,
+			IsWritable: false,
+			IsSigner:   false,
+		})
+	}
+	//
+	switch inst.TypeID {
+	case amm_v3.Instruction_Swap:
+		inst1 := inst.Impl.(*amm_v3.Swap)
+		inst1.SetAccounts(accounts)
+		//
+		t1 := h.processTokenTransfer(in.Children[0], tokenAccountOwner, tokenAccountMint)
+		t2 := h.processTokenTransfer(in.Children[1], tokenAccountOwner, tokenAccountMint)
+		//
+		trade := &db.Trade{
+			Pool:         inst1.GetPoolStateAccount().PublicKey.String(),
+			Type:         "deposit",
+			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
+			TokenBAmount: decimal.NewFromInt(int64(t2.Amount)),
+			User:         inst1.GetPayerAccount().PublicKey.String(),
+		}
+		return trade
+	case amm_v3.Instruction_IncreaseLiquidityV2:
+		inst1 := inst.Impl.(*amm_v3.IncreaseLiquidityV2)
+		inst1.SetAccounts(accounts)
+		//
+		t1 := h.processTokenTransfer(in.Children[0], tokenAccountOwner, tokenAccountMint)
+		t2 := h.processTokenTransfer(in.Children[1], tokenAccountOwner, tokenAccountMint)
+		//
+		trade := &db.Trade{
+			Pool:         inst1.GetPoolStateAccount().PublicKey.String(),
+			Type:         "deposit",
+			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
+			TokenBAmount: decimal.NewFromInt(int64(t2.Amount)),
+			User:         inst1.Get(0).PublicKey.String(),
+		}
+		return trade
+	case amm_v3.Instruction_DecreaseLiquidityV2:
+		inst1 := inst.Impl.(*amm_v3.DecreaseLiquidityV2)
+		inst1.SetAccounts(accounts)
+		//
+		t1 := h.processTokenTransfer(in.Children[0], tokenAccountOwner, tokenAccountMint)
+		t2 := h.processTokenTransfer(in.Children[1], tokenAccountOwner, tokenAccountMint)
+		//
+		trade := &db.Trade{
+			Pool:         inst1.GetPoolStateAccount().PublicKey.String(),
+			Type:         "deposit",
+			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
+			TokenBAmount: decimal.NewFromInt(int64(t2.Amount)),
+			User:         inst1.Get(0).PublicKey.String(),
+		}
+		return trade
+	case amm_v3.Instruction_SwapV2:
+		inst1 := inst.Impl.(*amm_v3.SwapV2)
+		inst1.SetAccounts(accounts)
+		//
+		t1 := h.processTokenTransfer(in.Children[0], tokenAccountOwner, tokenAccountMint)
+		t2 := h.processTokenTransfer(in.Children[1], tokenAccountOwner, tokenAccountMint)
+		//
+		trade := &db.Trade{
+			Pool:         inst1.GetPoolStateAccount().PublicKey.String(),
+			Type:         "deposit",
+			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
+			TokenBAmount: decimal.NewFromInt(int64(t2.Amount)),
+			User:         inst1.Get(0).PublicKey.String(),
+		}
+		return trade
+	}
 	return nil
 }
 
 func (h *Handler) processWhirlPoolTrade(in *types.InstructionNode, tokenAccountOwner map[solana.PublicKey]solana.PublicKey, tokenAccountMint map[solana.PublicKey]solana.PublicKey) *db.Trade {
+	inst := new(whirlpool.Instruction)
+	data := in.Instruction.Data
+	err := ag_binary.NewBorshDecoder(data).Decode(inst)
+	if err != nil {
+		return nil
+	}
+	//
+	accounts := make([]*solana.AccountMeta, 0)
+	for _, item := range in.Instruction.Accounts {
+		accounts = append(accounts, &solana.AccountMeta{
+			PublicKey:  item,
+			IsWritable: false,
+			IsSigner:   false,
+		})
+	}
+	//
+	switch inst.TypeID {
+	case whirlpool.Instruction_Swap:
+		inst1 := inst.Impl.(*whirlpool.Swap)
+		inst1.SetAccounts(accounts)
+		//
+		t1 := h.processTokenTransfer(in.Children[0], tokenAccountOwner, tokenAccountMint)
+		t2 := h.processTokenTransfer(in.Children[1], tokenAccountOwner, tokenAccountMint)
+		//
+		trade := &db.Trade{
+			Pool:         inst1.GetWhirlpoolAccount().PublicKey.String(),
+			Type:         "deposit",
+			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
+			TokenBAmount: decimal.NewFromInt(int64(t2.Amount)),
+			User:         inst1.GetTokenAuthorityAccount().PublicKey.String(),
+		}
+		return trade
+	case whirlpool.Instruction_IncreaseLiquidity:
+		inst1 := inst.Impl.(*whirlpool.IncreaseLiquidity)
+		inst1.SetAccounts(accounts)
+		//
+		t1 := h.processTokenTransfer(in.Children[0], tokenAccountOwner, tokenAccountMint)
+		t2 := h.processTokenTransfer(in.Children[1], tokenAccountOwner, tokenAccountMint)
+		//
+		trade := &db.Trade{
+			Pool:         inst1.GetWhirlpoolAccount().PublicKey.String(),
+			Type:         "deposit",
+			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
+			TokenBAmount: decimal.NewFromInt(int64(t2.Amount)),
+			User:         inst1.GetPositionAuthorityAccount().PublicKey.String(),
+		}
+		return trade
+	case whirlpool.Instruction_DecreaseLiquidity:
+		inst1 := inst.Impl.(*whirlpool.DecreaseLiquidity)
+		inst1.SetAccounts(accounts)
+		//
+		t1 := h.processTokenTransfer(in.Children[0], tokenAccountOwner, tokenAccountMint)
+		t2 := h.processTokenTransfer(in.Children[1], tokenAccountOwner, tokenAccountMint)
+		//
+		trade := &db.Trade{
+			Pool:         inst1.GetWhirlpoolAccount().PublicKey.String(),
+			Type:         "deposit",
+			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
+			TokenBAmount: decimal.NewFromInt(int64(t2.Amount)),
+			User:         inst1.GetPositionAuthorityAccount().PublicKey.String(),
+		}
+		return trade
+	}
 	return nil
 }
