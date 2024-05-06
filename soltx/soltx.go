@@ -167,9 +167,18 @@ func (h *Handler) parseBlock(block *rpc.GetParsedBlockResult) []*types.Transacti
 		for _, item := range message.AccountKeys {
 			accounts = append(accounts, item.PublicKey)
 		}
+		tokenAccountOwner := make(map[solana.PublicKey]solana.PublicKey)
+		tokenAccountMint := make(map[solana.PublicKey]solana.PublicKey)
+		for _, item := range meta.PostTokenBalances {
+			tokenAccount := accounts[item.AccountIndex]
+			tokenAccountOwner[tokenAccount] = *item.Owner
+			tokenAccountMint[tokenAccount] = item.Mint
+		}
 		inTree := &types.Transaction{
-			Hash:         transaction.Transaction.Signatures[0],
-			Instructions: nil,
+			Hash:              transaction.Transaction.Signatures[0],
+			TokenAccountOwner: tokenAccountOwner,
+			TokenAccountMint:  tokenAccountMint,
+			Instructions:      nil,
 		}
 		subInstructions(instructions, inTree)
 		innerInstructions := meta.InnerInstructions
@@ -203,7 +212,7 @@ func (h *Handler) processBlock(block *rpc.GetParsedBlockResult) {
 			Time:        uint64(*block.BlockTime),
 		}
 		for _, item1 := range item.Instructions {
-			h.processInstruction(item1, id2Trades, id2Transfers, hash2Pools)
+			h.processInstruction(item1, item.TokenAccountOwner, item.TokenAccountMint, id2Trades, id2Transfers, hash2Pools)
 		}
 	}
 	// save all
@@ -230,26 +239,27 @@ func (h *Handler) processBlock(block *rpc.GetParsedBlockResult) {
 	h.dao.SavePool(pools)
 }
 
-func (h *Handler) processInstruction(in *types.InstructionNode, trades map[string]*db.Trade, transfers map[string]*db.Transfer, pools map[string]*db.Pool) () {
+func (h *Handler) processInstruction(in *types.InstructionNode, tokenAccountOwner map[solana.PublicKey]solana.PublicKey, tokenAccountMint map[solana.PublicKey]solana.PublicKey,
+	trades map[string]*db.Trade, transfers map[string]*db.Transfer, pools map[string]*db.Pool) () {
 	switch in.Instruction.ProgramId {
 	case types.System:
-		h.processSystemTransfer(in)
+		h.processSystemTransfer(in, tokenAccountOwner, tokenAccountMint)
 	case types.Token:
-		h.processTokenTransfer(in)
+		h.processTokenTransfer(in, tokenAccountOwner, tokenAccountMint)
 	case types.RaydiumAMM:
-		h.processRaydiumAmmTrade(in)
+		h.processRaydiumAmmTrade(in, tokenAccountOwner, tokenAccountMint)
 	case types.RaydiumClmm:
-		h.processRaydiumClmmTrade(in)
+		h.processRaydiumClmmTrade(in, tokenAccountOwner, tokenAccountMint)
 	case types.WhirlPool:
-		h.processWhirlPoolTrade(in)
+		h.processWhirlPoolTrade(in, tokenAccountOwner, tokenAccountMint)
 	default:
 		for _, item := range in.Children {
-			h.processInstruction(item, trades, transfers, pools)
+			h.processInstruction(item, tokenAccountOwner, tokenAccountMint, trades, transfers, pools)
 		}
 	}
 }
 
-func (h *Handler) processSystemTransfer(in *types.InstructionNode) *db.Transfer {
+func (h *Handler) processSystemTransfer(in *types.InstructionNode, tokenAccountOwner map[solana.PublicKey]solana.PublicKey, tokenAccountMint map[solana.PublicKey]solana.PublicKey) *db.Transfer {
 	type instruction struct {
 		Info struct {
 			Destination solana.PublicKey `json:"destination"`
@@ -271,7 +281,7 @@ func (h *Handler) processSystemTransfer(in *types.InstructionNode) *db.Transfer 
 	return transfer
 }
 
-func (h *Handler) processTokenTransfer(in *types.InstructionNode) *db.Transfer {
+func (h *Handler) processTokenTransfer(in *types.InstructionNode, tokenAccountOwner map[solana.PublicKey]solana.PublicKey, tokenAccountMint map[solana.PublicKey]solana.PublicKey) *db.Transfer {
 	type instruction struct {
 		Info struct {
 			Destination solana.PublicKey `json:"destination"`
@@ -280,7 +290,7 @@ func (h *Handler) processTokenTransfer(in *types.InstructionNode) *db.Transfer {
 			Authority   solana.PublicKey `json:"authority"`
 			Mint        solana.PublicKey `json:"mint"`
 			TokenAmount struct {
-				Amount   decimal.Decimal
+				Amount   uint64
 				Decimals uint64
 			} `json:"tokenAmount"`
 		} `json:"info"`
@@ -290,16 +300,24 @@ func (h *Handler) processTokenTransfer(in *types.InstructionNode) *db.Transfer {
 	var s instruction
 	k, _ := ins.Parsed.MarshalJSON()
 	json.Unmarshal(k, &s)
+	//
+	amount := s.Info.Lamports
+	if s.T == "transferChecked" {
+		amount = s.Info.TokenAmount.Amount
+	}
+	mint := tokenAccountMint[s.Info.Source]
+	from := tokenAccountOwner[s.Info.Source]
+	to := tokenAccountOwner[s.Info.Destination]
 	transfer := &db.Transfer{
-		Mint:   "",
-		Amount: s.Info.Lamports,
-		From:   s.Info.Source.String(),
-		To:     s.Info.Destination.String(),
+		Mint:   mint.String(),
+		Amount: amount,
+		From:   from.String(),
+		To:     to.String(),
 	}
 	return transfer
 }
 
-func (h *Handler) processRaydiumAmmTrade(in *types.InstructionNode) *db.Trade {
+func (h *Handler) processRaydiumAmmTrade(in *types.InstructionNode, tokenAccountOwner map[solana.PublicKey]solana.PublicKey, tokenAccountMint map[solana.PublicKey]solana.PublicKey) *db.Trade {
 	inst := new(raydium_amm.Instruction)
 	data := in.Instruction.Data
 	err := ag_binary.NewBorshDecoder(data).Decode(inst)
@@ -360,10 +378,10 @@ func (h *Handler) processRaydiumAmmTrade(in *types.InstructionNode) *db.Trade {
 	return nil
 }
 
-func (h *Handler) processRaydiumClmmTrade(in *types.InstructionNode) *db.Trade {
+func (h *Handler) processRaydiumClmmTrade(in *types.InstructionNode, tokenAccountOwner map[solana.PublicKey]solana.PublicKey, tokenAccountMint map[solana.PublicKey]solana.PublicKey) *db.Trade {
 	return nil
 }
 
-func (h *Handler) processWhirlPoolTrade(in *types.InstructionNode) *db.Trade {
+func (h *Handler) processWhirlPoolTrade(in *types.InstructionNode, tokenAccountOwner map[solana.PublicKey]solana.PublicKey, tokenAccountMint map[solana.PublicKey]solana.PublicKey) *db.Trade {
 	return nil
 }

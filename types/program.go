@@ -22,8 +22,10 @@ var (
 )
 
 type Transaction struct {
-	Hash         solana.Signature   `json:"hash"`
-	Instructions []*InstructionNode `json:"instructions"`
+	Hash              solana.Signature `json:"hash"`
+	TokenAccountOwner map[solana.PublicKey]solana.PublicKey
+	TokenAccountMint  map[solana.PublicKey]solana.PublicKey
+	Instructions      []*InstructionNode `json:"instructions"`
 }
 
 type InstructionNode struct {

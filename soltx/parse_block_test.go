@@ -16,7 +16,7 @@ func Test_ParseBlock(t *testing.T) {
 	version := uint64(0)
 	r, err := client.GetParsedBlockWithOpts(
 		context.Background(),
-		262286706,
+		263991594,
 		&rpc.GetBlockOpts{
 			Encoding:                       solana.EncodingJSONParsed,
 			TransactionDetails:             rpc.TransactionDetailsFull,
@@ -28,6 +28,8 @@ func Test_ParseBlock(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
+	rJson, _ := json.MarshalIndent(r, "", "    ")
+	os.WriteFile(fmt.Sprintf("block.json"), rJson, 0644)
 	//fmt.Printf("%v\n", r)
 	h := New(context.Background(), "./../env")
 	txTrees := h.parseBlock(r)
