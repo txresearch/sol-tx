@@ -34,7 +34,8 @@ type Transfer struct {
 	BlockSeq    uint64
 	Mint        string
 	Amount      uint64
-	User        string
+	From        string
+	To          string
 }
 
 type Mint struct {

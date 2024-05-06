@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	ag_binary "github.com/gagliardetto/binary"
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/hashicorp/go-hclog"
+	"github.com/shopspring/decimal"
 	"github.com/sol-tx/blocksubscribe"
 	"github.com/sol-tx/config"
 	"github.com/sol-tx/db"
 	"github.com/sol-tx/log"
+	raydium_amm "github.com/sol-tx/raydiumamm/generated"
 	"github.com/sol-tx/types"
 	"os"
 )
@@ -247,14 +250,113 @@ func (h *Handler) processInstruction(in *types.InstructionNode, trades map[strin
 }
 
 func (h *Handler) processSystemTransfer(in *types.InstructionNode) *db.Transfer {
-	return nil
+	type instruction struct {
+		Info struct {
+			Destination solana.PublicKey `json:"destination"`
+			Lamports    uint64           `json:"lamports"`
+			Source      solana.PublicKey `json:"source"`
+		} `json:"info"`
+		T string `json:"type"`
+	}
+	ins := in.Instruction
+	var s instruction
+	k, _ := ins.Parsed.MarshalJSON()
+	json.Unmarshal(k, &s)
+	transfer := &db.Transfer{
+		Mint:   "",
+		Amount: s.Info.Lamports,
+		From:   s.Info.Source.String(),
+		To:     s.Info.Destination.String(),
+	}
+	return transfer
 }
 
 func (h *Handler) processTokenTransfer(in *types.InstructionNode) *db.Transfer {
-	return nil
+	type instruction struct {
+		Info struct {
+			Destination solana.PublicKey `json:"destination"`
+			Lamports    uint64           `json:"lamports"`
+			Source      solana.PublicKey `json:"source"`
+			Authority   solana.PublicKey `json:"authority"`
+			Mint        solana.PublicKey `json:"mint"`
+			TokenAmount struct {
+				Amount   decimal.Decimal
+				Decimals uint64
+			} `json:"tokenAmount"`
+		} `json:"info"`
+		T string `json:"type"`
+	}
+	ins := in.Instruction
+	var s instruction
+	k, _ := ins.Parsed.MarshalJSON()
+	json.Unmarshal(k, &s)
+	transfer := &db.Transfer{
+		Mint:   "",
+		Amount: s.Info.Lamports,
+		From:   s.Info.Source.String(),
+		To:     s.Info.Destination.String(),
+	}
+	return transfer
 }
 
 func (h *Handler) processRaydiumAmmTrade(in *types.InstructionNode) *db.Trade {
+	inst := new(raydium_amm.Instruction)
+	data := in.Instruction.Data
+	err := ag_binary.NewBorshDecoder(data).Decode(inst)
+	if err != nil {
+		return nil
+	}
+	if inst.TypeID.Uint8() != raydium_amm.Instruction_Deposit {
+		accounts := make([]*solana.AccountMeta, 0)
+		for _, item := range in.Instruction.Accounts {
+			accounts = append(accounts, &solana.AccountMeta{
+				PublicKey:  item,
+				IsWritable: false,
+				IsSigner:   false,
+			})
+		}
+		inst1 := inst.Impl.(*raydium_amm.Deposit)
+		inst1.SetAccounts(accounts)
+		//
+		type instruction struct {
+			Info struct {
+				Destination solana.PublicKey `json:"destination"`
+				Lamports    uint64           `json:"lamports"`
+				Source      solana.PublicKey `json:"source"`
+				Authority   solana.PublicKey `json:"authority"`
+				Mint        solana.PublicKey `json:"mint"`
+				TokenAmount struct {
+					Amount   decimal.Decimal
+					Decimals uint64
+				} `json:"tokenAmount"`
+			} `json:"info"`
+			T string `json:"type"`
+		}
+		tokenAAmount := uint64(0)
+		{
+			ins := in.Instruction
+			var s instruction
+			k, _ := ins.Parsed.MarshalJSON()
+			json.Unmarshal(k, &s)
+			tokenAAmount = s.Info.Lamports
+		}
+		tokenBAmount := uint64(0)
+		{
+			ins := in.Instruction
+			var s instruction
+			k, _ := ins.Parsed.MarshalJSON()
+			json.Unmarshal(k, &s)
+			tokenBAmount = s.Info.Lamports
+		}
+		trade := &db.Trade{
+			Pool:         inst1.GetAmmAccount().PublicKey.String(),
+			Type:         "deposit",
+			TokenAAmount: decimal.NewFromInt(int64(tokenAAmount)),
+			TokenBAmount: decimal.NewFromInt(int64(tokenBAmount)),
+			User:         inst1.GetAmmAuthorityAccount().PublicKey.String(),
+		}
+		return trade
+	}
 	return nil
 }
 
