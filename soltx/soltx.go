@@ -368,7 +368,7 @@ func (h *Handler) processRaydiumAmmTrade(in *types.InstructionNode, tokenAccount
 		}
 		return trade
 	case raydium_amm.Instruction_SwapBaseOut:
-		inst1 := inst.Impl.(*raydium_amm.SwapBaseIn)
+		inst1 := inst.Impl.(*raydium_amm.SwapBaseOut)
 		inst1.SetAccounts(accounts)
 		//
 		t1 := h.processTokenTransfer(in.Children[0], tokenAccountOwner, tokenAccountMint)
@@ -383,7 +383,7 @@ func (h *Handler) processRaydiumAmmTrade(in *types.InstructionNode, tokenAccount
 		}
 		return trade
 	case raydium_amm.Instruction_Withdraw:
-		inst1 := inst.Impl.(*raydium_amm.SwapBaseIn)
+		inst1 := inst.Impl.(*raydium_amm.Withdraw)
 		inst1.SetAccounts(accounts)
 		//
 		t1 := h.processTokenTransfer(in.Children[0], tokenAccountOwner, tokenAccountMint)
