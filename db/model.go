@@ -15,6 +15,13 @@ type Transaction struct {
 	Time        uint64
 }
 
+const (
+	CreatePool      = "create_pool"
+	AddLiquidity    = "add_liquidity"
+	RemoveLiquidity = "remove_liquidity"
+	Swap            = "swap"
+)
+
 type Trade struct {
 	TxHash       string `gorm:"type:varchar;not null;uniqueIndex:trade_index"`
 	TxSeq        uint64 `gorm:"type:uint;not null;uniqueIndex:trade_index"`
