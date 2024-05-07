@@ -18,6 +18,7 @@ import (
 	"github.com/sol-tx/types"
 	whirlpool "github.com/sol-tx/whirlpool/generated"
 	"os"
+	"time"
 )
 
 type Handler struct {
@@ -144,7 +145,7 @@ func (h *Handler) parseBlock(block *rpc.GetParsedBlockResult) []*types.Transacti
 	h.log.Info("blockHandler", "hash", block.Blockhash, "time", block.BlockTime.Time().UTC().Format("2006-01-02 15:04:05"))
 	// must with meta - json parsed
 	txTrees := make([]*types.Transaction, 0)
-	for _, transaction := range block.Transactions {
+	for i, transaction := range block.Transactions {
 		meta := transaction.Meta
 		if meta == nil {
 			h.log.Error("transaction meta is missing")
@@ -178,6 +179,7 @@ func (h *Handler) parseBlock(block *rpc.GetParsedBlockResult) []*types.Transacti
 		}
 		inTree := &types.Transaction{
 			Hash:              transaction.Transaction.Signatures[0],
+			Seq:               i,
 			TokenAccountOwner: tokenAccountOwner,
 			TokenAccountMint:  tokenAccountMint,
 			Instructions:      nil,
@@ -193,7 +195,28 @@ func (h *Handler) parseBlock(block *rpc.GetParsedBlockResult) []*types.Transacti
 	return txTrees
 }
 
+func baseTxSeq(depth int) uint64 {
+	switch depth {
+	case 5:
+		return types.Pow101
+	case 4:
+		return types.Pow102
+	case 3:
+		return types.Pow103
+	case 2:
+		return types.Pow102
+	case 1:
+		return types.Pow105
+	default:
+		return 1
+	}
+}
+
 func (h *Handler) processBlock(block *rpc.GetParsedBlockResult) {
+	h.log.Info("process block begin", "slot", block.BlockHeight, "time", time.Now().UnixNano())
+	defer func() {
+		h.log.Info("process block end", "slot", block.BlockHeight, "time", time.Now().UnixNano())
+	}()
 	tree := h.parseBlock(block)
 	b := &db.Block{
 		Height: *block.BlockHeight,
@@ -210,14 +233,17 @@ func (h *Handler) processBlock(block *rpc.GetParsedBlockResult) {
 		t := &db.Transaction{
 			Hash:        tx.Hash.String(),
 			BlockHeight: *block.BlockHeight,
+			BlockSeq:    uint64(tx.Seq),
 			Time:        uint64(*block.BlockTime),
 		}
 		hash2Transactions[tx.Hash.String()] = t
-		for i, in := range tx.Instructions {
-			h.processInstruction(in, tx.TokenAccountOwner, tx.TokenAccountMint, b, i, t, id2Trades, id2Transfers, hash2Pools)
+		for _, in := range tx.Instructions {
+			h.processInstruction(in, tx.TokenAccountOwner, tx.TokenAccountMint, b, t, 0, id2Trades, id2Transfers, hash2Pools)
 		}
 	}
 	// save all
+	blocks := make([]*db.Block, 0)
+	blocks = append(blocks, b)
 	transactions := make([]*db.Transaction, 0)
 	for _, v := range hash2Transactions {
 		transactions = append(transactions, v)
@@ -234,38 +260,49 @@ func (h *Handler) processBlock(block *rpc.GetParsedBlockResult) {
 	for _, v := range hash2Pools {
 		pools = append(pools, v)
 	}
-	h.dao.SaveBlock(b)
-	h.dao.SaveTransaction(transactions)
-	h.dao.SaveTrade(trades)
-	h.dao.SaveTransfer(transfers)
-	h.dao.SavePool(pools)
+	if len(blocks) > 0 {
+		h.dao.SaveBlock(blocks)
+	}
+	if len(transactions) > 0 {
+		h.dao.SaveTransaction(transactions)
+	}
+	if len(trades) > 0 {
+		h.dao.SaveTrade(trades)
+	}
+	if len(transfers) > 0 {
+		h.dao.SaveTransfer(transfers)
+	}
+	if len(pools) > 0 {
+		h.dao.SavePool(pools)
+	}
 }
 
 func (h *Handler) processInstruction(inn *types.InstructionNode,
 	tokenAccountOwner map[solana.PublicKey]solana.PublicKey, tokenAccountMint map[solana.PublicKey]solana.PublicKey,
-	b *db.Block, seq int, t *db.Transaction,
-	trades map[string]*db.Trade, transfers map[string]*db.Transfer, pools map[string]*db.Pool) () {
+	b *db.Block, t *db.Transaction, parentSeq uint64,
+	trades map[string]*db.Trade, transfers map[string]*db.Transfer, pools map[string]*db.Pool) {
 	switch inn.Instruction.ProgramId {
 	case types.System:
-		h.processSystemTransfer(inn, tokenAccountOwner, tokenAccountMint, b, seq, t, trades, transfers, pools)
+		h.processSystemTransfer(inn, tokenAccountOwner, tokenAccountMint, b, t, parentSeq, trades, transfers, pools)
 	case types.Token:
-		h.processTokenTransfer(inn, tokenAccountOwner, tokenAccountMint, b, seq, t, trades, transfers, pools)
+		h.processTokenTransfer(inn, tokenAccountOwner, tokenAccountMint, b, t, parentSeq, trades, transfers, pools)
 	case types.RaydiumAMM:
-		h.processRaydiumAmmTrade(inn, tokenAccountOwner, tokenAccountMint, b, seq, t, trades, transfers, pools)
+		h.processRaydiumAmmTrade(inn, tokenAccountOwner, tokenAccountMint, b, t, parentSeq, trades, transfers, pools)
 	case types.RaydiumClmm:
-		h.processRaydiumClmmTrade(inn, tokenAccountOwner, tokenAccountMint, b, seq, t, trades, transfers, pools)
+		h.processRaydiumClmmTrade(inn, tokenAccountOwner, tokenAccountMint, b, t, parentSeq, trades, transfers, pools)
 	case types.WhirlPool:
-		h.processWhirlPoolTrade(inn, tokenAccountOwner, tokenAccountMint, b, seq, t, trades, transfers, pools)
+		h.processWhirlPoolTrade(inn, tokenAccountOwner, tokenAccountMint, b, t, parentSeq, trades, transfers, pools)
 	default:
 		for _, item := range inn.Children {
-			h.processInstruction(item, tokenAccountOwner, tokenAccountMint, b, seq, t, trades, transfers, pools)
+			seq := parentSeq + baseTxSeq(inn.Instruction.StackHeight)*uint64(inn.Seq)
+			h.processInstruction(item, tokenAccountOwner, tokenAccountMint, b, t, seq, trades, transfers, pools)
 		}
 	}
 }
 
 func (h *Handler) processSystemTransfer(inn *types.InstructionNode,
 	tokenAccountOwner map[solana.PublicKey]solana.PublicKey, tokenAccountMint map[solana.PublicKey]solana.PublicKey,
-	b *db.Block, seq int, t *db.Transaction,
+	b *db.Block, t *db.Transaction, parentSeq uint64,
 	trades map[string]*db.Trade, transfers map[string]*db.Transfer, pools map[string]*db.Pool) {
 	type instruction struct {
 		Info struct {
@@ -278,33 +315,36 @@ func (h *Handler) processSystemTransfer(inn *types.InstructionNode,
 	inJson, _ := inn.Instruction.Parsed.MarshalJSON()
 	var in instruction
 	json.Unmarshal(inJson, &in)
-	transfer := &db.Transfer{
-		BlockHeight: b.Height,
-		BlockSeq:    uint64(seq),
-		TxHash:      t.Hash,
-		TxSeq:       uint64(inn.Instruction.StackHeight*1000 + inn.Seq),
-		Mint:        "11111111111111111111111111111111",
-		Amount:      in.Info.Lamports,
-		From:        in.Info.Source.String(),
-		To:          in.Info.Destination.String(),
+	switch in.T {
+	case "transfer":
+		transfer := &db.Transfer{
+			BlockHeight: b.Height,
+			BlockSeq:    t.BlockSeq,
+			TxHash:      t.Hash,
+			TxSeq:       parentSeq + baseTxSeq(inn.Instruction.StackHeight)*uint64(inn.Seq),
+			Mint:        "11111111111111111111111111111111",
+			Amount:      in.Info.Lamports,
+			From:        in.Info.Source.String(),
+			To:          in.Info.Destination.String(),
+		}
+		transfers[fmt.Sprintf("%s_%d", transfer.TxHash, transfer.TxSeq)] = transfer
 	}
-	transfers[fmt.Sprintf("%s_%d", transfer.TxHash, transfer.TxSeq)] = transfer
 }
 
 func (h *Handler) processTokenTransfer(inn *types.InstructionNode,
 	tokenAccountOwner map[solana.PublicKey]solana.PublicKey, tokenAccountMint map[solana.PublicKey]solana.PublicKey,
-	b *db.Block, seq int, t *db.Transaction,
+	b *db.Block, t *db.Transaction, parentSeq uint64,
 	trades map[string]*db.Trade, transfers map[string]*db.Transfer, pools map[string]*db.Pool) {
 	type instruction struct {
 		Info struct {
 			Destination solana.PublicKey `json:"destination"`
-			Lamports    uint64           `json:"lamports"`
+			Lamports    uint64           `json:"amount,string"`
 			Source      solana.PublicKey `json:"source"`
 			Authority   solana.PublicKey `json:"authority"`
 			Mint        solana.PublicKey `json:"mint"`
 			TokenAmount struct {
-				Amount   uint64
-				Decimals uint64
+				Amount   uint64 `json:"amount,string"`
+				Decimals uint64 `json:"decimals"`
 			} `json:"tokenAmount"`
 		} `json:"info"`
 		T string `json:"type"`
@@ -312,24 +352,50 @@ func (h *Handler) processTokenTransfer(inn *types.InstructionNode,
 	inJson, _ := inn.Instruction.Parsed.MarshalJSON()
 	var in instruction
 	json.Unmarshal(inJson, &in)
-	amount := in.Info.Lamports
-	if in.T == "transferChecked" {
-		amount = in.Info.TokenAmount.Amount
+	switch in.T {
+	case "transfer":
+		mint := tokenAccountMint[in.Info.Source]
+		from := in.Info.Source
+		if k, ok := tokenAccountOwner[in.Info.Source]; ok {
+			from = k
+		}
+		to := in.Info.Destination
+		if k, ok := tokenAccountOwner[in.Info.Destination]; ok {
+			to = k
+		}
+		transfer := &db.Transfer{
+			BlockHeight: b.Height,
+			BlockSeq:    t.BlockSeq,
+			TxHash:      t.Hash,
+			TxSeq:       parentSeq + baseTxSeq(inn.Instruction.StackHeight)*uint64(inn.Seq),
+			Mint:        mint.String(),
+			Amount:      in.Info.Lamports,
+			From:        from.String(),
+			To:          to.String(),
+		}
+		transfers[fmt.Sprintf("%s_%d", transfer.TxHash, transfer.TxSeq)] = transfer
+	case "transferChecked":
+		mint := tokenAccountMint[in.Info.Source]
+		from := in.Info.Source
+		if k, ok := tokenAccountOwner[in.Info.Source]; ok {
+			from = k
+		}
+		to := in.Info.Destination
+		if k, ok := tokenAccountOwner[in.Info.Destination]; ok {
+			to = k
+		}
+		transfer := &db.Transfer{
+			BlockHeight: b.Height,
+			BlockSeq:    t.BlockSeq,
+			TxHash:      t.Hash,
+			TxSeq:       parentSeq + baseTxSeq(inn.Instruction.StackHeight)*uint64(inn.Seq),
+			Mint:        mint.String(),
+			Amount:      in.Info.TokenAmount.Amount,
+			From:        from.String(),
+			To:          to.String(),
+		}
+		transfers[fmt.Sprintf("%s_%d", transfer.TxHash, transfer.TxSeq)] = transfer
 	}
-	mint := tokenAccountMint[in.Info.Source]
-	from := tokenAccountOwner[in.Info.Source]
-	to := tokenAccountOwner[in.Info.Destination]
-	transfer := &db.Transfer{
-		BlockHeight: b.Height,
-		BlockSeq:    uint64(seq),
-		TxHash:      t.Hash,
-		TxSeq:       uint64(inn.Instruction.StackHeight*1000 + inn.Seq),
-		Mint:        mint.String(),
-		Amount:      amount,
-		From:        from.String(),
-		To:          to.String(),
-	}
-	transfers[fmt.Sprintf("%s_%d", transfer.TxHash, transfer.TxSeq)] = transfer
 }
 
 func (h *Handler) getTokenTransfer(inn *types.InstructionNode,
@@ -351,25 +417,49 @@ func (h *Handler) getTokenTransfer(inn *types.InstructionNode,
 	inJson, _ := inn.Instruction.Parsed.MarshalJSON()
 	var in instruction
 	json.Unmarshal(inJson, &in)
-	amount := in.Info.Lamports
-	if in.T == "transferChecked" {
-		amount = in.Info.TokenAmount.Amount
+	switch in.T {
+	case "transfer":
+		mint := tokenAccountMint[in.Info.Source]
+		from := in.Info.Source
+		if k, ok := tokenAccountOwner[in.Info.Source]; ok {
+			from = k
+		}
+		to := in.Info.Destination
+		if k, ok := tokenAccountOwner[in.Info.Destination]; ok {
+			to = k
+		}
+		transfer := &db.Transfer{
+			Mint:   mint.String(),
+			Amount: in.Info.Lamports,
+			From:   from.String(),
+			To:     to.String(),
+		}
+		return transfer
+	case "transferChecked":
+		mint := tokenAccountMint[in.Info.Source]
+		from := in.Info.Source
+		if k, ok := tokenAccountOwner[in.Info.Source]; ok {
+			from = k
+		}
+		to := in.Info.Destination
+		if k, ok := tokenAccountOwner[in.Info.Destination]; ok {
+			to = k
+		}
+		transfer := &db.Transfer{
+			Mint:   mint.String(),
+			Amount: in.Info.TokenAmount.Amount,
+			From:   from.String(),
+			To:     to.String(),
+		}
+		return transfer
+	default:
+		return nil
 	}
-	mint := tokenAccountMint[in.Info.Source]
-	from := tokenAccountOwner[in.Info.Source]
-	to := tokenAccountOwner[in.Info.Destination]
-	transfer := &db.Transfer{
-		Mint:   mint.String(),
-		Amount: amount,
-		From:   from.String(),
-		To:     to.String(),
-	}
-	return transfer
 }
 
 func (h *Handler) processRaydiumAmmTrade(inn *types.InstructionNode,
 	tokenAccountOwner map[solana.PublicKey]solana.PublicKey, tokenAccountMint map[solana.PublicKey]solana.PublicKey,
-	b *db.Block, seq int, t *db.Transaction,
+	b *db.Block, t *db.Transaction, parentSeq uint64,
 	trades map[string]*db.Trade, transfers map[string]*db.Transfer, pools map[string]*db.Pool) {
 	inst := new(raydium_amm.Instruction)
 	err := ag_binary.NewBorshDecoder(inn.Instruction.Data).Decode(inst)
@@ -394,9 +484,9 @@ func (h *Handler) processRaydiumAmmTrade(inn *types.InstructionNode,
 		//
 		trade := &db.Trade{
 			BlockHeight:  b.Height,
-			BlockSeq:     uint64(seq),
+			BlockSeq:     t.BlockSeq,
 			TxHash:       t.Hash,
-			TxSeq:        uint64(inn.Instruction.StackHeight*1000 + inn.Seq),
+			TxSeq:        parentSeq + baseTxSeq(inn.Instruction.StackHeight)*uint64(inn.Seq),
 			Pool:         inst1.GetAmmAccount().PublicKey.String(),
 			Type:         db.CreatePool,
 			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
@@ -426,9 +516,9 @@ func (h *Handler) processRaydiumAmmTrade(inn *types.InstructionNode,
 		//
 		trade := &db.Trade{
 			BlockHeight:  b.Height,
-			BlockSeq:     uint64(seq),
+			BlockSeq:     t.BlockSeq,
 			TxHash:       t.Hash,
-			TxSeq:        uint64(inn.Instruction.StackHeight*1000 + inn.Seq),
+			TxSeq:        parentSeq + baseTxSeq(inn.Instruction.StackHeight)*uint64(inn.Seq),
 			Pool:         inst1.GetAmmAccount().PublicKey.String(),
 			Type:         db.AddLiquidity,
 			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
@@ -445,9 +535,9 @@ func (h *Handler) processRaydiumAmmTrade(inn *types.InstructionNode,
 		//
 		trade := &db.Trade{
 			BlockHeight:  b.Height,
-			BlockSeq:     uint64(seq),
+			BlockSeq:     t.BlockSeq,
 			TxHash:       t.Hash,
-			TxSeq:        uint64(inn.Instruction.StackHeight*1000 + inn.Seq),
+			TxSeq:        parentSeq + baseTxSeq(inn.Instruction.StackHeight)*uint64(inn.Seq),
 			Pool:         inst1.GetAmmAccount().PublicKey.String(),
 			Type:         db.Swap,
 			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
@@ -464,9 +554,9 @@ func (h *Handler) processRaydiumAmmTrade(inn *types.InstructionNode,
 		//
 		trade := &db.Trade{
 			BlockHeight:  b.Height,
-			BlockSeq:     uint64(seq),
+			BlockSeq:     t.BlockSeq,
 			TxHash:       t.Hash,
-			TxSeq:        uint64(inn.Instruction.StackHeight*1000 + inn.Seq),
+			TxSeq:        parentSeq + baseTxSeq(inn.Instruction.StackHeight)*uint64(inn.Seq),
 			Pool:         inst1.GetAmmAccount().PublicKey.String(),
 			Type:         db.Swap,
 			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
@@ -483,9 +573,9 @@ func (h *Handler) processRaydiumAmmTrade(inn *types.InstructionNode,
 		//
 		trade := &db.Trade{
 			BlockHeight:  b.Height,
-			BlockSeq:     uint64(seq),
+			BlockSeq:     t.BlockSeq,
 			TxHash:       t.Hash,
-			TxSeq:        uint64(inn.Instruction.StackHeight*1000 + inn.Seq),
+			TxSeq:        parentSeq + baseTxSeq(inn.Instruction.StackHeight)*uint64(inn.Seq),
 			Pool:         inst1.GetAmmAccount().PublicKey.String(),
 			Type:         db.RemoveLiquidity,
 			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
@@ -498,7 +588,7 @@ func (h *Handler) processRaydiumAmmTrade(inn *types.InstructionNode,
 
 func (h *Handler) processRaydiumClmmTrade(inn *types.InstructionNode,
 	tokenAccountOwner map[solana.PublicKey]solana.PublicKey, tokenAccountMint map[solana.PublicKey]solana.PublicKey,
-	b *db.Block, seq int, t *db.Transaction,
+	b *db.Block, t *db.Transaction, parentSeq uint64,
 	trades map[string]*db.Trade, transfers map[string]*db.Transfer, pools map[string]*db.Pool) {
 	inst := new(amm_v3.Instruction)
 	err := ag_binary.NewBorshDecoder(inn.Instruction.Data).Decode(inst)
@@ -538,9 +628,9 @@ func (h *Handler) processRaydiumClmmTrade(inn *types.InstructionNode,
 		//
 		trade := &db.Trade{
 			BlockHeight:  b.Height,
-			BlockSeq:     uint64(seq),
+			BlockSeq:     t.BlockSeq,
 			TxHash:       t.Hash,
-			TxSeq:        uint64(inn.Instruction.StackHeight*1000 + inn.Seq),
+			TxSeq:        parentSeq + baseTxSeq(inn.Instruction.StackHeight)*uint64(inn.Seq),
 			Pool:         inst1.GetPoolStateAccount().PublicKey.String(),
 			Type:         db.AddLiquidity,
 			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
@@ -557,9 +647,9 @@ func (h *Handler) processRaydiumClmmTrade(inn *types.InstructionNode,
 		//
 		trade := &db.Trade{
 			BlockHeight:  b.Height,
-			BlockSeq:     uint64(seq),
+			BlockSeq:     t.BlockSeq,
 			TxHash:       t.Hash,
-			TxSeq:        uint64(inn.Instruction.StackHeight*1000 + inn.Seq),
+			TxSeq:        parentSeq + baseTxSeq(inn.Instruction.StackHeight)*uint64(inn.Seq),
 			Pool:         inst1.GetPoolStateAccount().PublicKey.String(),
 			Type:         db.RemoveLiquidity,
 			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
@@ -576,9 +666,9 @@ func (h *Handler) processRaydiumClmmTrade(inn *types.InstructionNode,
 		//
 		trade := &db.Trade{
 			BlockHeight:  b.Height,
-			BlockSeq:     uint64(seq),
+			BlockSeq:     t.BlockSeq,
 			TxHash:       t.Hash,
-			TxSeq:        uint64(inn.Instruction.StackHeight*1000 + inn.Seq),
+			TxSeq:        parentSeq + baseTxSeq(inn.Instruction.StackHeight)*uint64(inn.Seq),
 			Pool:         inst1.GetPoolStateAccount().PublicKey.String(),
 			Type:         db.Swap,
 			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
@@ -595,9 +685,9 @@ func (h *Handler) processRaydiumClmmTrade(inn *types.InstructionNode,
 		//
 		trade := &db.Trade{
 			BlockHeight:  b.Height,
-			BlockSeq:     uint64(seq),
+			BlockSeq:     t.BlockSeq,
 			TxHash:       t.Hash,
-			TxSeq:        uint64(inn.Instruction.StackHeight*1000 + inn.Seq),
+			TxSeq:        parentSeq + baseTxSeq(inn.Instruction.StackHeight)*uint64(inn.Seq),
 			Pool:         inst1.GetPoolStateAccount().PublicKey.String(),
 			Type:         db.Swap,
 			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
@@ -610,7 +700,7 @@ func (h *Handler) processRaydiumClmmTrade(inn *types.InstructionNode,
 
 func (h *Handler) processWhirlPoolTrade(inn *types.InstructionNode,
 	tokenAccountOwner map[solana.PublicKey]solana.PublicKey, tokenAccountMint map[solana.PublicKey]solana.PublicKey,
-	b *db.Block, seq int, t *db.Transaction,
+	b *db.Block, t *db.Transaction, parentSeq uint64,
 	trades map[string]*db.Trade, transfers map[string]*db.Transfer, pools map[string]*db.Pool) {
 	inst := new(whirlpool.Instruction)
 	err := ag_binary.NewBorshDecoder(inn.Instruction.Data).Decode(inst)
@@ -632,9 +722,9 @@ func (h *Handler) processWhirlPoolTrade(inn *types.InstructionNode,
 		//
 		trade := &db.Trade{
 			BlockHeight:  b.Height,
-			BlockSeq:     uint64(seq),
+			BlockSeq:     t.BlockSeq,
 			TxHash:       t.Hash,
-			TxSeq:        uint64(inn.Instruction.StackHeight*1000 + inn.Seq),
+			TxSeq:        parentSeq + baseTxSeq(inn.Instruction.StackHeight)*uint64(inn.Seq),
 			Pool:         inst1.GetWhirlpoolAccount().PublicKey.String(),
 			Type:         db.Swap,
 			TokenAAmount: decimal.NewFromInt(0),
@@ -651,9 +741,9 @@ func (h *Handler) processWhirlPoolTrade(inn *types.InstructionNode,
 		//
 		trade := &db.Trade{
 			BlockHeight:  b.Height,
-			BlockSeq:     uint64(seq),
+			BlockSeq:     t.BlockSeq,
 			TxHash:       t.Hash,
-			TxSeq:        uint64(inn.Instruction.StackHeight*1000 + inn.Seq),
+			TxSeq:        parentSeq + baseTxSeq(inn.Instruction.StackHeight)*uint64(inn.Seq),
 			Pool:         inst1.GetWhirlpoolAccount().PublicKey.String(),
 			Type:         db.Swap,
 			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
@@ -670,9 +760,9 @@ func (h *Handler) processWhirlPoolTrade(inn *types.InstructionNode,
 		//
 		trade := &db.Trade{
 			BlockHeight:  b.Height,
-			BlockSeq:     uint64(seq),
+			BlockSeq:     t.BlockSeq,
 			TxHash:       t.Hash,
-			TxSeq:        uint64(inn.Instruction.StackHeight*1000 + inn.Seq),
+			TxSeq:        parentSeq + baseTxSeq(inn.Instruction.StackHeight)*uint64(inn.Seq),
 			Pool:         inst1.GetWhirlpoolAccount().PublicKey.String(),
 			Type:         db.AddLiquidity,
 			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
@@ -689,9 +779,9 @@ func (h *Handler) processWhirlPoolTrade(inn *types.InstructionNode,
 		//
 		trade := &db.Trade{
 			BlockHeight:  b.Height,
-			BlockSeq:     uint64(seq),
+			BlockSeq:     t.BlockSeq,
 			TxHash:       t.Hash,
-			TxSeq:        uint64(inn.Instruction.StackHeight*1000 + inn.Seq),
+			TxSeq:        parentSeq + baseTxSeq(inn.Instruction.StackHeight)*uint64(inn.Seq),
 			Pool:         inst1.GetWhirlpoolAccount().PublicKey.String(),
 			Type:         db.RemoveLiquidity,
 			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),

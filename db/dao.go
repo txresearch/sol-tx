@@ -41,7 +41,7 @@ func New(cfg *Config) *Dao {
 	return s
 }
 
-func (d *Dao) SaveBlock(b *Block) error {
+func (d *Dao) SaveBlock(b interface{}) error {
 	return d.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "height"},

@@ -3,6 +3,15 @@ package types
 import (
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
+	"math"
+)
+
+var (
+	Pow105 = uint64(math.Pow10(15))
+	Pow104 = uint64(math.Pow10(12))
+	Pow103 = uint64(math.Pow10(9))
+	Pow102 = uint64(math.Pow10(6))
+	Pow101 = uint64(math.Pow10(3))
 )
 
 var (
@@ -25,6 +34,7 @@ type Transaction struct {
 	TokenAccountOwner map[solana.PublicKey]solana.PublicKey
 	TokenAccountMint  map[solana.PublicKey]solana.PublicKey
 	Instructions      []*InstructionNode `json:"instructions"`
+	Seq               int
 }
 
 type InstructionNode struct {
