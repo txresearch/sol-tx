@@ -115,7 +115,7 @@ func subInstructions(ins []*rpc.ParsedInstruction, inTree *types.Transaction) {
 	for i, in := range ins {
 		in.StackHeight = 1
 		current := &types.InstructionNode{
-			Seq:         i,
+			Seq:         i + 1,
 			Instruction: in,
 			Children:    nil,
 		}
@@ -132,7 +132,7 @@ func subInnerInstructions(ins []*rpc.ParsedInstruction, depth int, inTree *types
 			return
 		} else {
 			current = &types.InstructionNode{
-				Seq:         i,
+				Seq:         i + 1,
 				Instruction: in,
 				Children:    nil,
 			}
@@ -179,7 +179,7 @@ func (h *Handler) parseBlock(block *rpc.GetParsedBlockResult) []*types.Transacti
 		}
 		inTree := &types.Transaction{
 			Hash:              transaction.Transaction.Signatures[0],
-			Seq:               i,
+			Seq:               i + 1,
 			TokenAccountOwner: tokenAccountOwner,
 			TokenAccountMint:  tokenAccountMint,
 			Instructions:      nil,
@@ -281,6 +281,9 @@ func (h *Handler) processInstruction(inn *types.InstructionNode,
 	tokenAccountOwner map[solana.PublicKey]solana.PublicKey, tokenAccountMint map[solana.PublicKey]solana.PublicKey,
 	b *db.Block, t *db.Transaction, parentSeq uint64,
 	trades map[string]*db.Trade, transfers map[string]*db.Transfer, pools map[string]*db.Pool) {
+	if t.Hash == "BpF8KatKR2KBzfsU3jqphcQnwFR2UdQqenUHzJDypWfuMgaNj6WXWCbWTXJdvCZUfzMpXyB6mLpdLC2MEmavb1n" {
+		h.log.Info("xxxxxxx")
+	}
 	switch inn.Instruction.ProgramId {
 	case types.System:
 		h.processSystemTransfer(inn, tokenAccountOwner, tokenAccountMint, b, t, parentSeq, trades, transfers, pools)
@@ -403,13 +406,13 @@ func (h *Handler) getTokenTransfer(inn *types.InstructionNode,
 	type instruction struct {
 		Info struct {
 			Destination solana.PublicKey `json:"destination"`
-			Lamports    uint64           `json:"lamports"`
+			Lamports    uint64           `json:"amount,string"`
 			Source      solana.PublicKey `json:"source"`
 			Authority   solana.PublicKey `json:"authority"`
 			Mint        solana.PublicKey `json:"mint"`
 			TokenAmount struct {
-				Amount   uint64
-				Decimals uint64
+				Amount   uint64 `json:"amount,string"`
+				Decimals uint64 `json:"decimals"`
 			} `json:"tokenAmount"`
 		} `json:"info"`
 		T string `json:"type"`
@@ -491,7 +494,7 @@ func (h *Handler) processRaydiumAmmTrade(inn *types.InstructionNode,
 			Type:         db.CreatePool,
 			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
 			TokenBAmount: decimal.NewFromInt(int64(t2.Amount)),
-			User:         inst1.GetAmmAuthorityAccount().PublicKey.String(),
+			User:         inst1.GetUserWalletAccount().PublicKey.String(),
 		}
 		trades[fmt.Sprintf("%s_%d", trade.TxHash, trade.TxSeq)] = trade
 		//
@@ -523,12 +526,15 @@ func (h *Handler) processRaydiumAmmTrade(inn *types.InstructionNode,
 			Type:         db.AddLiquidity,
 			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
 			TokenBAmount: decimal.NewFromInt(int64(t2.Amount)),
-			User:         inst1.GetAmmAuthorityAccount().PublicKey.String(),
+			User:         inst1.GetUserOwnerAccount().PublicKey.String(),
 		}
 		trades[fmt.Sprintf("%s_%d", trade.TxHash, trade.TxSeq)] = trade
 	case raydium_amm.Instruction_SwapBaseIn:
 		inst1 := inst.Impl.(*raydium_amm.SwapBaseIn)
 		inst1.SetAccounts(accounts)
+		if len(inn.Children) < 2 {
+			return
+		}
 		//
 		t1 := h.getTokenTransfer(inn.Children[0], tokenAccountOwner, tokenAccountMint)
 		t2 := h.getTokenTransfer(inn.Children[1], tokenAccountOwner, tokenAccountMint)
@@ -542,7 +548,7 @@ func (h *Handler) processRaydiumAmmTrade(inn *types.InstructionNode,
 			Type:         db.Swap,
 			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
 			TokenBAmount: decimal.NewFromInt(int64(t2.Amount)),
-			User:         inst1.GetAmmAuthorityAccount().PublicKey.String(),
+			User:         inst1.GetUserSourceOwnerAccount().PublicKey.String(),
 		}
 		trades[fmt.Sprintf("%s_%d", trade.TxHash, trade.TxSeq)] = trade
 	case raydium_amm.Instruction_SwapBaseOut:
@@ -561,7 +567,7 @@ func (h *Handler) processRaydiumAmmTrade(inn *types.InstructionNode,
 			Type:         db.Swap,
 			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
 			TokenBAmount: decimal.NewFromInt(int64(t2.Amount)),
-			User:         inst1.GetAmmAuthorityAccount().PublicKey.String(),
+			User:         inst1.GetUserSourceOwnerAccount().PublicKey.String(),
 		}
 		trades[fmt.Sprintf("%s_%d", trade.TxHash, trade.TxSeq)] = trade
 	case raydium_amm.Instruction_Withdraw:
@@ -580,7 +586,7 @@ func (h *Handler) processRaydiumAmmTrade(inn *types.InstructionNode,
 			Type:         db.RemoveLiquidity,
 			TokenAAmount: decimal.NewFromInt(int64(t1.Amount)),
 			TokenBAmount: decimal.NewFromInt(int64(t2.Amount)),
-			User:         inst1.GetAmmAuthorityAccount().PublicKey.String(),
+			User:         inst1.GetUserOwnerAccount().PublicKey.String(),
 		}
 		trades[fmt.Sprintf("%s_%d", trade.TxHash, trade.TxSeq)] = trade
 	}

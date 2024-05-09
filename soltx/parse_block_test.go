@@ -46,7 +46,7 @@ func Test_ProcessBlock(t *testing.T) {
 	version := uint64(0)
 	r, err := client.GetParsedBlockWithOpts(
 		context.Background(),
-		262286706,
+		264352375,
 		&rpc.GetBlockOpts{
 			Encoding:                       solana.EncodingJSONParsed,
 			TransactionDetails:             rpc.TransactionDetailsFull,
