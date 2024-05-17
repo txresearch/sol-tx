@@ -62,3 +62,22 @@ func Test_ProcessBlock(t *testing.T) {
 	h := New(context.Background(), "./../env")
 	h.processBlock(r)
 }
+
+func Test_ParsedTransaction(t *testing.T) {
+	client := rpc.New(rpc.DevNet_RPC)
+	version := uint64(0)
+	hash := solana.MustSignatureFromBase58("pEbxY8Fe1Lvie38JUXKwPX2YJCB5WVQbpBnzAnSsdoMjJ7XtWYC5pG3gYUHYojNgX7owPqe56nC5NzWxKVA8L1w")
+	tx, err := client.GetParsedTransaction(
+		context.Background(),
+		hash,
+		&rpc.GetParsedTransactionOpts{
+			Commitment:                     rpc.CommitmentConfirmed,
+			MaxSupportedTransactionVersion: &version,
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+	txJson, _ := json.MarshalIndent(tx, "", "    ")
+	fmt.Printf("%s\n", txJson)
+}
