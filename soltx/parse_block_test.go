@@ -64,9 +64,9 @@ func Test_ProcessBlock(t *testing.T) {
 }
 
 func Test_ParsedTransaction(t *testing.T) {
-	client := rpc.New(rpc.DevNet_RPC)
+	client := rpc.New(rpc.MainNetBeta_RPC)
 	version := uint64(0)
-	hash := solana.MustSignatureFromBase58("pEbxY8Fe1Lvie38JUXKwPX2YJCB5WVQbpBnzAnSsdoMjJ7XtWYC5pG3gYUHYojNgX7owPqe56nC5NzWxKVA8L1w")
+	hash := solana.MustSignatureFromBase58("2XXCwDoJFzKb5sqvmssoBAV8VnrhQspLraLJFfsvPLsHyEiirDf22ttqFdv5gwpWKY6ZsHG5f7GLmA9sEhoDS4pB")
 	tx, err := client.GetParsedTransaction(
 		context.Background(),
 		hash,

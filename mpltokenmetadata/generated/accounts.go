@@ -890,7 +890,7 @@ func (obj Metadata) MarshalWithEncoder(encoder *ag_binary.Encoder) (err error) {
 
 func (obj *Metadata) UnmarshalWithDecoder(decoder *ag_binary.Decoder) (err error) {
 	// Read and check account discriminator:
-	{
+	if false {
 		discriminator, err := decoder.ReadTypeID()
 		if err != nil {
 			return err

@@ -9,7 +9,7 @@ import (
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/hashicorp/go-hclog"
 	"github.com/shopspring/decimal"
-	"github.com/sol-tx/blocksubscribe"
+	"github.com/sol-tx/block"
 	"github.com/sol-tx/config"
 	"github.com/sol-tx/db"
 	"github.com/sol-tx/log"
@@ -24,12 +24,12 @@ import (
 type Handler struct {
 	ctx            context.Context
 	log            hclog.Logger
-	blockSubscribe *blocksubscribe.BlockSubscribe
+	blockSubscribe *block.Block
 	updatedBlocks  chan *rpc.GetParsedBlockResult
 	dao            *db.Dao
 }
 
-func newBlockSubscribe(ctx context.Context, cfg config.BlockSubscribe, cb blocksubscribe.Callback) *blocksubscribe.BlockSubscribe {
+func newBlockSubscribe(ctx context.Context, cfg config.BlockSubscribe, cb block.Callback) *block.Block {
 	rpcUrls := make([]string, 0)
 	wsUrls := make([]string, 0)
 	for _, node := range cfg.Nodes {
@@ -38,7 +38,7 @@ func newBlockSubscribe(ctx context.Context, cfg config.BlockSubscribe, cb blocks
 			wsUrls = append(wsUrls, node.Ws)
 		}
 	}
-	return blocksubscribe.New(ctx, rpcUrls, wsUrls, cb)
+	return block.New(ctx, rpcUrls, wsUrls, cb)
 }
 
 func newDao(ctx context.Context, cfg config.Dao) *db.Dao {
