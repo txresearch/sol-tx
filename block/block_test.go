@@ -7,23 +7,23 @@ import (
 	"time"
 )
 
-type BlockSubscribeCallback struct {
+type BlockCallback struct {
 }
 
-func (cb *BlockSubscribeCallback) OnBlock(block *rpc.GetParsedBlockResult) error {
+func (cb *BlockCallback) OnBlock(block *rpc.GetParsedBlockResult) error {
 	return nil
 }
 
-func TestBlockSubscribe_Start(t *testing.T) {
-	var cb BlockSubscribeCallback
+func TestBlock_Start(t *testing.T) {
+	var cb BlockCallback
 	bs := New(context.Background(), []string{rpc.MainNetBeta_RPC}, []string{rpc.MainNetBeta_WS}, &cb)
 	bs.Subscribe()
 	//
 	time.Sleep(time.Second * 100000)
 }
 
-func TestBlockSubscribe_Reset(t *testing.T) {
-	var cb BlockSubscribeCallback
+func TestBlock_ReFetch(t *testing.T) {
+	var cb BlockCallback
 	bs := New(context.Background(), []string{rpc.MainNetBeta_RPC}, []string{rpc.MainNetBeta_WS}, &cb)
 	bs.ReFetch(311363595, 311363601)
 	//
