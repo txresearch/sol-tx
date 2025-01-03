@@ -6,35 +6,27 @@ import (
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/shopspring/decimal"
+	"github.com/sol-tx/transaction/types"
 	"time"
 )
 
 type Transaction struct {
 	Hash         solana.Signature
-	Accounts     []rpc.ParsedMessageAccount
-	TokenOwner   map[solana.PublicKey]solana.PublicKey
-	TokenMint    map[solana.PublicKey]solana.PublicKey
-	PreBalance   map[solana.PublicKey]decimal.Decimal
-	PostBalance  map[solana.PublicKey]decimal.Decimal
 	Instructions []*Instruction
+	Meta         types.Meta
 	Slot         uint64
 	BlockTime    time.Time
-	ErrorMessage []byte
 	Seq          int
 }
 
-type Instruction struct {
-	Seq         int
-	Instruction *rpc.ParsedInstruction
-	Children    []*Instruction
-}
-
-func NewTransaction() *Transaction {
+func New() *Transaction {
 	return &Transaction{
-		TokenOwner:  make(map[solana.PublicKey]solana.PublicKey),
-		TokenMint:   make(map[solana.PublicKey]solana.PublicKey),
-		PreBalance:  make(map[solana.PublicKey]decimal.Decimal),
-		PostBalance: make(map[solana.PublicKey]decimal.Decimal),
+		Meta: types.Meta{
+			TokenOwner:  make(map[solana.PublicKey]solana.PublicKey),
+			TokenMint:   make(map[solana.PublicKey]solana.PublicKey),
+			PreBalance:  make(map[solana.PublicKey]decimal.Decimal),
+			PostBalance: make(map[solana.PublicKey]decimal.Decimal),
+		},
 	}
 }
 
@@ -50,7 +42,7 @@ func (t *Transaction) Parse(tx *rpc.ParsedTransactionWithMeta) error {
 	if meta.Err != nil {
 		// if failed, ignore this transaction
 		errJson, _ := json.Marshal(meta.Err)
-		t.ErrorMessage = errJson
+		t.Meta.ErrorMessage = errJson
 		return nil
 	}
 	message := transaction.Message
@@ -62,16 +54,16 @@ func (t *Transaction) Parse(tx *rpc.ParsedTransactionWithMeta) error {
 		return nil
 	}
 	// account infos
-	t.Accounts = message.AccountKeys
+	t.Meta.Accounts = message.AccountKeys
 	for _, item := range meta.PostTokenBalances {
-		account := t.Accounts[item.AccountIndex]
-		t.TokenOwner[account.PublicKey] = *item.Owner
-		t.TokenMint[account.PublicKey] = item.Mint
-		t.PostBalance[account.PublicKey], _ = decimal.NewFromString(item.UiTokenAmount.Amount)
+		account := t.Meta.Accounts[item.AccountIndex]
+		t.Meta.TokenOwner[account.PublicKey] = *item.Owner
+		t.Meta.TokenMint[account.PublicKey] = item.Mint
+		t.Meta.PostBalance[account.PublicKey], _ = decimal.NewFromString(item.UiTokenAmount.Amount)
 	}
 	for _, item := range meta.PreTokenBalances {
-		account := t.Accounts[item.AccountIndex]
-		t.PreBalance[account.PublicKey], _ = decimal.NewFromString(item.UiTokenAmount.Amount)
+		account := t.Meta.Accounts[item.AccountIndex]
+		t.Meta.PreBalance[account.PublicKey], _ = decimal.NewFromString(item.UiTokenAmount.Amount)
 	}
 	for index, instruction := range instructions {
 		instruction.StackHeight = 1
@@ -85,38 +77,28 @@ func (t *Transaction) Parse(tx *rpc.ParsedTransactionWithMeta) error {
 	innerInstructions := meta.InnerInstructions
 	for _, innerInstruction := range innerInstructions {
 		parent := t.Instructions[innerInstruction.Index]
-		t.parseInnerInstructions(innerInstruction.Instructions, parent)
+		parent.parseInstructions(innerInstruction.Instructions)
 	}
 	return nil
 }
 
-func (t *Transaction) split(ins []*rpc.ParsedInstruction) []int {
-	currentHeight := ins[0].StackHeight
-	split := make([]int, 0)
-	for index, item := range ins {
-		if item.StackHeight == currentHeight {
-			split = append(split, index)
-		}
+func (t *Transaction) ParseActions(parsers map[solana.PublicKey]types.ActionParser) error {
+	for _, instruction := range t.Instructions {
+		t.instructionActions(instruction, parsers)
 	}
-	return split
+	return nil
 }
 
-func (t *Transaction) parseInnerInstructions(ins []*rpc.ParsedInstruction, parent *Instruction) {
-	if len(ins) == 0 {
+func (t *Transaction) instructionActions(in *Instruction, parsers map[solana.PublicKey]types.ActionParser) {
+	for _, child := range in.Children {
+		t.instructionActions(child, parsers)
+	}
+	parser, ok := parsers[in.Instruction.ProgramId]
+	if !ok {
 		return
 	}
-	// ins split by stack height
-	split := t.split(ins)
-	split = append(split, len(ins))
-	for i := 0; i < len(split)-1; i++ {
-		index1 := split[i]
-		index2 := split[i+1]
-		current := &Instruction{
-			Seq:         i + 1,
-			Instruction: ins[index1],
-			Children:    nil,
-		}
-		parent.Children = append(parent.Children, current)
-		t.parseInnerInstructions(ins[index1+1:index2], current)
+	event := parser.Parse(in, &t.Meta)
+	if event != nil {
+		in.Event = event
 	}
 }

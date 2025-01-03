@@ -2,7 +2,6 @@ package types
 
 import (
 	"github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/rpc"
 	"math"
 )
 
@@ -16,7 +15,7 @@ var (
 
 var (
 	Compute         = solana.MustPublicKeyFromBase58("ComputeBudget111111111111111111111111111111")
-	Token           = solana.MustPublicKeyFromBase58("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
+	TokenProgram    = solana.MustPublicKeyFromBase58("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
 	System          = solana.MustPublicKeyFromBase58("11111111111111111111111111111111")
 	SysRent         = solana.MustPublicKeyFromBase58("SysvarRent111111111111111111111111111111111")
 	AssociatedToken = solana.MustPublicKeyFromBase58("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
@@ -28,17 +27,3 @@ var (
 	RaydiumAMM      = solana.MustPublicKeyFromBase58("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8")
 	Vote            = solana.MustPublicKeyFromBase58("Vote111111111111111111111111111111111111111")
 )
-
-type Transaction struct {
-	Hash              solana.Signature `json:"hash"`
-	TokenAccountOwner map[solana.PublicKey]solana.PublicKey
-	TokenAccountMint  map[solana.PublicKey]solana.PublicKey
-	Instructions      []*InstructionNode `json:"instructions"`
-	Seq               int
-}
-
-type InstructionNode struct {
-	Seq         int                    `json:"seq"`
-	Instruction *rpc.ParsedInstruction `json:"instruction"`
-	Children    []*InstructionNode     `json:"children,omitempty"`
-}

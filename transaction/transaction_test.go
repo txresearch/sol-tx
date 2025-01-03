@@ -25,8 +25,12 @@ func TestTransaction_Parse(t *testing.T) {
 		Transaction: result.Transaction,
 		Meta:        result.Meta,
 	}
-	tx := NewTransaction()
+	tx := New()
 	err = tx.Parse(transaction)
+	if err != nil {
+		panic(err)
+	}
+	err = tx.ParseActions(nil)
 	if err != nil {
 		panic(err)
 	}

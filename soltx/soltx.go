@@ -15,6 +15,7 @@ import (
 	"github.com/sol-tx/log"
 	raydium_amm "github.com/sol-tx/raydiumamm/generated"
 	amm_v3 "github.com/sol-tx/raydiumclmm/generated"
+	"github.com/sol-tx/transaction"
 	"github.com/sol-tx/types"
 	whirlpool "github.com/sol-tx/whirlpool/generated"
 	"os"
@@ -22,14 +23,14 @@ import (
 )
 
 type Handler struct {
-	ctx            context.Context
-	log            hclog.Logger
-	blockSubscribe *block.Block
-	updatedBlocks  chan *rpc.GetParsedBlockResult
-	dao            *db.Dao
+	ctx           context.Context
+	log           hclog.Logger
+	blockHandler  *block.Block
+	updatedBlocks chan *rpc.GetParsedBlockResult
+	dao           *db.Dao
 }
 
-func newBlockSubscribe(ctx context.Context, cfg config.BlockSubscribe, cb block.Callback) *block.Block {
+func newBlockHandle(ctx context.Context, cfg config.BlockHandler, cb block.Callback) *block.Block {
 	rpcUrls := make([]string, 0)
 	wsUrls := make([]string, 0)
 	for _, node := range cfg.Nodes {
@@ -64,20 +65,17 @@ func New(ctx context.Context, dir string) *Handler {
 	if err != nil {
 		panic(err)
 	}
-	//
 	t := &Handler{
 		ctx:           ctx,
 		log:           log.NewLog("sol-tx"),
 		updatedBlocks: make(chan *rpc.GetParsedBlockResult, 1024),
 	}
-	//
-	t.blockSubscribe = newBlockSubscribe(ctx, cfg.BlockSubscribe, t)
-	t.dao = newDao(ctx, cfg.Dao)
+	t.blockHandler = newBlockHandle(ctx, cfg.BlockHandler, t)
 	return t
 }
 
 func (h *Handler) Start() error {
-	h.blockSubscribe.Start()
+	h.blockHandler.Subscribe()
 	go h.process()
 	return nil
 }
@@ -89,6 +87,7 @@ func (h *Handler) Service() {
 }
 
 func (h *Handler) Stop() error {
+	h.blockHandler.Unsubscribe()
 	return nil
 }
 
@@ -103,96 +102,32 @@ func (h *Handler) process() {
 	}()
 	for {
 		select {
-		case block := <-h.updatedBlocks:
-			h.processBlock(block)
+		case blockResult := <-h.updatedBlocks:
+			h.processBlock(blockResult)
 		case <-h.ctx.Done():
 			return
 		}
 	}
 }
 
-func subInstructions(ins []*rpc.ParsedInstruction, inTree *types.Transaction) {
-	for i, in := range ins {
-		in.StackHeight = 1
-		current := &types.InstructionNode{
-			Seq:         i + 1,
-			Instruction: in,
-			Children:    nil,
+func (h *Handler) parseBlock(block *rpc.GetParsedBlockResult) []*transaction.Transaction {
+	h.log.Info("block handler", "hash", block.Blockhash, "height", *block.BlockHeight, "time", block.BlockTime.Time().UTC().Format("2006-01-02 15:04:05"))
+	myTxs := make([]*transaction.Transaction, 0)
+	for i, tx := range block.Transactions {
+		myTx := transaction.New()
+		err := myTx.Parse(&tx)
+		if err != nil {
+			h.log.Error("failed to parse transaction", "error", err)
+			continue
 		}
-		inTree.Instructions = append(inTree.Instructions, current)
+		myTx.Seq = i + 1
+		if len(myTx.Instructions) == 0 {
+			// no instruction
+			continue
+		}
+		myTxs = append(myTxs, myTx)
 	}
-}
-
-func subInnerInstructions(ins []*rpc.ParsedInstruction, depth int, inTree *types.InstructionNode) {
-	var current *types.InstructionNode
-	for i, in := range ins {
-		if in.StackHeight == depth+1 {
-			subInnerInstructions(ins[i:], in.StackHeight, current)
-		} else if in.StackHeight == depth-1 {
-			return
-		} else {
-			current = &types.InstructionNode{
-				Seq:         i + 1,
-				Instruction: in,
-				Children:    nil,
-			}
-			inTree.Children = append(inTree.Children, current)
-		}
-	}
-}
-
-func (h *Handler) parseBlock(block *rpc.GetParsedBlockResult) []*types.Transaction {
-	h.log.Info("blockHandler", "hash", block.Blockhash, "time", block.BlockTime.Time().UTC().Format("2006-01-02 15:04:05"))
-	// must with meta - json parsed
-	txTrees := make([]*types.Transaction, 0)
-	for i, transaction := range block.Transactions {
-		meta := transaction.Meta
-		if meta == nil {
-			h.log.Error("transaction meta is missing")
-			continue
-		}
-		if meta.Err != nil {
-			h.log.Warn("transaction failed, ignore this one")
-			continue
-		}
-		parsedTransaction := transaction.Transaction
-		message := parsedTransaction.Message
-		instructions := message.Instructions
-		if len(instructions) == 0 {
-			h.log.Warn("no instruction")
-			continue
-		}
-		if instructions[0].ProgramId == types.Vote {
-			continue
-		}
-		//
-		accounts := make([]solana.PublicKey, 0)
-		for _, item := range message.AccountKeys {
-			accounts = append(accounts, item.PublicKey)
-		}
-		tokenAccountOwner := make(map[solana.PublicKey]solana.PublicKey)
-		tokenAccountMint := make(map[solana.PublicKey]solana.PublicKey)
-		for _, item := range meta.PostTokenBalances {
-			tokenAccount := accounts[item.AccountIndex]
-			tokenAccountOwner[tokenAccount] = *item.Owner
-			tokenAccountMint[tokenAccount] = item.Mint
-		}
-		inTree := &types.Transaction{
-			Hash:              transaction.Transaction.Signatures[0],
-			Seq:               i + 1,
-			TokenAccountOwner: tokenAccountOwner,
-			TokenAccountMint:  tokenAccountMint,
-			Instructions:      nil,
-		}
-		subInstructions(instructions, inTree)
-		innerInstructions := meta.InnerInstructions
-		for _, innerInstruction := range innerInstructions {
-			pinn := inTree.Instructions[innerInstruction.Index]
-			subInnerInstructions(innerInstruction.Instructions, 2, pinn)
-		}
-		txTrees = append(txTrees, inTree)
-	}
-	return txTrees
+	return myTxs
 }
 
 func baseTxSeq(depth int) uint64 {
@@ -213,23 +148,33 @@ func baseTxSeq(depth int) uint64 {
 }
 
 func (h *Handler) processBlock(block *rpc.GetParsedBlockResult) {
-	h.log.Info("process block begin", "slot", block.BlockHeight, "time", time.Now().UnixNano())
+	h.log.Info("process block begin", "height", *block.BlockHeight, "time", time.Now().UnixNano())
 	defer func() {
-		h.log.Info("process block end", "slot", block.BlockHeight, "time", time.Now().UnixNano())
+		h.log.Info("process block end", "height", *block.BlockHeight, "time", time.Now().UnixNano())
 	}()
-	tree := h.parseBlock(block)
 	b := &db.Block{
 		Height: *block.BlockHeight,
 		Time:   uint64(*block.BlockTime),
 		Hash:   block.Blockhash.String(),
 		Slot:   0,
 	}
+	txes := h.parseBlock(block)
+	hash2Transactions := make(map[string]*db.Transaction, 0)
+	for _, tx := range txes {
+		t := &db.Transaction{
+			Hash:        tx.Hash.String(),
+			BlockHeight: *block.BlockHeight,
+			BlockSeq:    uint64(tx.Seq),
+			Time:        uint64(*block.BlockTime),
+		}
+		hash2Transactions[tx.Hash.String()] = t
+	}
 	// save hash2Transactions
 	hash2Transactions := make(map[string]*db.Transaction, 0)
 	id2Trades := make(map[string]*db.Trade, 0)
 	id2Transfers := make(map[string]*db.Transfer, 0)
 	hash2Pools := make(map[string]*db.Pool, 0)
-	for _, tx := range tree {
+	for _, tx := range txes {
 		t := &db.Transaction{
 			Hash:        tx.Hash.String(),
 			BlockHeight: *block.BlockHeight,
@@ -277,7 +222,7 @@ func (h *Handler) processBlock(block *rpc.GetParsedBlockResult) {
 	}
 }
 
-func (h *Handler) processInstruction(inn *types.InstructionNode,
+func (h *Handler) processInstruction(inn *transaction.Instruction,
 	tokenAccountOwner map[solana.PublicKey]solana.PublicKey, tokenAccountMint map[solana.PublicKey]solana.PublicKey,
 	b *db.Block, t *db.Transaction, parentSeq uint64,
 	trades map[string]*db.Trade, transfers map[string]*db.Transfer, pools map[string]*db.Pool) {

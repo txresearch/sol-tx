@@ -8,7 +8,7 @@ type Node struct {
 	Ws     string
 }
 
-type BlockSubscribe struct {
+type BlockHandler struct {
 	Nodes []Node
 }
 
@@ -28,8 +28,8 @@ type Dao struct {
 }
 
 type Config struct {
-	Mainnet        bool
-	BlockSubscribe BlockSubscribe
-	Programs       []Program
-	Dao            Dao
+	Mainnet      bool
+	BlockHandler BlockHandler
+	Programs     []Program
+	Dao          Dao
 }

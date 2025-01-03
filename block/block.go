@@ -98,7 +98,7 @@ func (b *Block) subscribeBlock() {
 				return false
 			}
 			block := got.Value.Block
-			b.log.Info("receive block", "slot", got.Value.Slot, "block time", block.BlockTime.String())
+			b.log.Info("receive block", "slot", got.Value.Slot, "block time", block.BlockTime.Time().UTC().Format("2006-01-02 15:04:05"))
 			if b.cb != nil {
 				b.cb.OnBlock(block)
 			}
@@ -169,7 +169,7 @@ func (b *Block) fetchBlock(start uint64, end uint64) {
 				slot++
 				continue
 			}
-			b.log.Info("fetch block", "block height", *block.BlockHeight, "slot", slot, "block time", block.BlockTime.String())
+			b.log.Info("fetch block", "block height", *block.BlockHeight, "slot", slot, "block time", block.BlockTime.Time().UTC().Format("2006-01-02 15:04:05"))
 			if b.cb != nil {
 				b.cb.OnBlock(block)
 			}
