@@ -16,17 +16,17 @@ type Transaction struct {
 	TokenMint    map[solana.PublicKey]solana.PublicKey
 	PreBalance   map[solana.PublicKey]decimal.Decimal
 	PostBalance  map[solana.PublicKey]decimal.Decimal
-	Instructions []*InstructionNode
+	Instructions []*Instruction
 	Slot         uint64
 	BlockTime    time.Time
 	ErrorMessage []byte
 	Seq          int
 }
 
-type InstructionNode struct {
+type Instruction struct {
 	Seq         int
 	Instruction *rpc.ParsedInstruction
-	Children    []*InstructionNode
+	Children    []*Instruction
 }
 
 func NewTransaction() *Transaction {
@@ -75,7 +75,7 @@ func (t *Transaction) Parse(tx *rpc.ParsedTransactionWithMeta) error {
 	}
 	for index, instruction := range instructions {
 		instruction.StackHeight = 1
-		current := &InstructionNode{
+		current := &Instruction{
 			Seq:         index + 1,
 			Instruction: instruction,
 			Children:    nil,
@@ -101,17 +101,17 @@ func (t *Transaction) split(ins []*rpc.ParsedInstruction) []int {
 	return split
 }
 
-func (t *Transaction) parseInnerInstructions(ins []*rpc.ParsedInstruction, parent *InstructionNode) {
+func (t *Transaction) parseInnerInstructions(ins []*rpc.ParsedInstruction, parent *Instruction) {
 	if len(ins) == 0 {
 		return
 	}
 	// ins split by stack height
-	splited := t.split(ins)
-	splited = append(splited, len(ins))
-	for i := 0; i < len(splited)-1; i++ {
-		index1 := splited[i]
-		index2 := splited[i+1]
-		current := &InstructionNode{
+	split := t.split(ins)
+	split = append(split, len(ins))
+	for i := 0; i < len(split)-1; i++ {
+		index1 := split[i]
+		index2 := split[i+1]
+		current := &Instruction{
 			Seq:         i + 1,
 			Instruction: ins[index1],
 			Children:    nil,
